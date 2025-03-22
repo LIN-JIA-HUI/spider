@@ -1,0 +1,84 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model C_Product {
+  F_SeqNo         Int      @id @default(autoincrement())
+  F_Createdate    DateTime
+  F_UpdateTime    DateTime
+  F_Stat          String   @db.NChar(1)
+  F_Keyin         String?  @db.NVarChar(20)
+  F_Security      String?  @db.Char(1)
+  F_Owner         String?  @db.NVarChar(20)
+  F_Product       String?  @db.NVarChar(30)
+  F_Vendor        String?  @db.NVarChar(20)
+  F_GPU_Image_URL String?  @db.NVarChar(100)
+  F_BU            String?  @db.NVarChar(20)
+  F_Desc          String?  @db.NVarChar(Max)
+}
+
+model C_Specs_Database {
+  F_SeqNo       Int      @id @default(autoincrement())
+  F_Createdate  DateTime
+  F_UpdateTime  DateTime
+  F_Stat        String   @db.NChar(1)
+  F_Keyin       String?  @db.NVarChar(20)
+  F_Security    String?  @db.Char(1)
+  F_Owner       String?  @db.NVarChar(20)
+  F_Master_Table String?  @db.NVarChar(20)
+  F_Master_ID   String?  @db.NVarChar(20)
+  F_Type        String?  @db.NVarChar(20)
+  F_Name        String?  @db.NVarChar(50)
+  F_Value       String?  @db.NVarChar(Max)
+}
+
+model C_Product_Review {
+  F_SeqNo       Int      @id @default(autoincrement())
+  F_Createdate  DateTime
+  F_UpdateTime  DateTime
+  F_Stat        String   @db.NChar(1)
+  F_Keyin       String?  @db.NVarChar(20)
+  F_Security    String?  @db.Char(1)
+  F_Owner       String?  @db.NVarChar(20)
+  F_Master_Table String?  @db.NVarChar(20)
+  F_Master_ID   String?  @db.NVarChar(20)
+  F_Type        String?  @db.NVarChar(50)
+  F_Title       String?  @db.NVarChar(50)
+  F_Desc        String?  @db.NVarChar(Max)
+}
+
+model C_S_Flag {
+  F_SeqNo       Int      @id @default(autoincrement())
+  F_Createdate  DateTime
+  F_UpdateTime  DateTime
+  F_Stat        String   @db.NChar(1)
+  F_Keyin       String?  @db.NVarChar(20)
+  F_Security    String?  @db.Char(1)
+  F_Type        String?  @db.NVarChar(30)
+  F_ID          String?  @db.NVarChar(30)
+  F_Name        String?  @db.NVarChar(100)
+  F_Cate        String?  @db.NVarChar(30)
+  F_Attrbute    String?  @db.NVarChar(30)
+  F_URL         String?  @db.NVarChar(Max)
+}
+
+model C_Product_Review_Data {
+  F_SeqNo       Int      @id @default(autoincrement())
+  F_Review_ID   Int
+  F_Data_Type   String?  @db.NVarChar(50)
+  F_Data_Key    String?  @db.NVarChar(50)
+  F_Data_Value  String?  @db.NVarChar(100)
+  F_Data_Unit   String?  @db.NVarChar(20)
+  F_Product_Name String?  @db.NVarChar(100)
+}
