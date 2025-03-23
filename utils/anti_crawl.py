@@ -1,5 +1,6 @@
 import random
 import time
+import asyncio
 from fake_useragent import UserAgent
 import logging
 import os
@@ -43,14 +44,26 @@ class AntiCrawl:
             'TE': 'Trailers',
         }
     
+    def get_random_delay(self):
+        """返回一個隨機延遲值，不執行延遲"""
+        return random.uniform(self.min_delay, self.max_delay)
+    
     def random_delay(self):
-        """隨機延遲，模擬人類行為"""
-        delay = random.uniform(self.min_delay, self.max_delay)
+        """同步隨機延遲，模擬人類行為"""
+        delay = self.get_random_delay()
         logger.info(f"等待 {delay:.2f} 秒...")
         time.sleep(delay)
+        return delay
+    
+    async def random_delay_async(self):
+        """非同步隨機延遲，模擬人類行為"""
+        delay = self.get_random_delay()
+        logger.info(f"等待 {delay:.2f} 秒...")
+        await asyncio.sleep(delay)
+        return delay
     
     def handle_retry(self, attempt):
-        """處理重試邏輯"""
+        """處理同步重試邏輯"""
         if attempt >= self.max_retries:
             logger.error("達到最大重試次數，放棄請求")
             return False
@@ -58,4 +71,15 @@ class AntiCrawl:
         delay = self.retry_delays[attempt]
         logger.warning(f"請求失敗，{delay} 秒後重試 (嘗試 {attempt+1}/{self.max_retries})")
         time.sleep(delay)
+        return True
+    
+    async def handle_retry_async(self, attempt):
+        """處理非同步重試邏輯"""
+        if attempt >= self.max_retries:
+            logger.error("達到最大重試次數，放棄請求")
+            return False
+        
+        delay = self.retry_delays[attempt]
+        logger.warning(f"請求失敗，{delay} 秒後重試 (嘗試 {attempt+1}/{self.max_retries})")
+        await asyncio.sleep(delay)
         return True
