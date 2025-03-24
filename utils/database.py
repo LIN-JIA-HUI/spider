@@ -26,10 +26,13 @@ class Database:
             server = os.getenv('DB_SERVER', 'localhost')
             database = os.getenv('DB_NAME', 'PM')
             trusted_connection = os.getenv('DB_TRUSTED_CONNECTION', 'yes')
+            user = os.getenv('DB_USER', 'pg_user')
+            password = os.getenv('DB_PASSWORD', 'abc')
             
             # 使用 Windows 身份驗證連接
-            conn_str = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
-            
+            # conn_str = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
+            # 使用 SQL Server 驗證連接
+            conn_str = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={user};PWD={password}'
             # 嘗試連接
             self.conn = pyodbc.connect(conn_str)
             self.cursor = self.conn.cursor()
