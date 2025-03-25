@@ -64,6 +64,7 @@ class ScrapeState:
         }
 
 class StorageManager:
+
     """管理資料存儲的類"""
     def __init__(self, db, state):
         self.db = db
@@ -210,6 +211,7 @@ class StorageManager:
             return None
     
     async def store_review(self, product_id, board_id, board_name, review_contents):
+        
         """存儲評測資料，關聯到主板而非GPU"""
         try:
             for content in review_contents:

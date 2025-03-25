@@ -7,7 +7,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # 載入環境變數
-load_dotenv()
+load_dotenv(dotenv_path='./.env')
 
 logger = logging.getLogger(__name__)
 
@@ -25,16 +25,19 @@ class Database:
             # 從環境變數或預設值獲取連接信息
             server = os.getenv('DB_SERVER', 'localhost')
             database = os.getenv('DB_NAME', 'PM')
+            username = os.getenv('DB_USER', 'your_username') 
+            password = os.getenv('DB_PASSWORD', 'your_password') 
             trusted_connection = os.getenv('DB_TRUSTED_CONNECTION', 'yes')
-            user = os.getenv('DB_USER', 'pg_user')
-            password = os.getenv('DB_PASSWORD', 'abc')
             
             # 使用 Windows 身份驗證連接
-            # conn_str = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
-            # 使用 SQL Server 驗證連接
-            conn_str = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={user};PWD={password}'
+
+
+            connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
+
+            conn = pyodbc.connect(connection_string)
+            
             # 嘗試連接
-            self.conn = pyodbc.connect(conn_str)
+            self.conn = pyodbc.connect(connection_string)
             self.cursor = self.conn.cursor()
             
             logger.info("資料庫連接成功")
@@ -79,6 +82,8 @@ class Database:
         """創建產品記錄"""
         def _create_product():
             try:
+                self.cursor = self.conn.cursor()
+
                 now = datetime.now()
                 
                 # 準備插入數據
@@ -120,10 +125,12 @@ class Database:
         """創建或獲取規格類別"""
         def _create_spec_category():
             try:
+                self.cursor = self.conn.cursor()
+
                 now = datetime.now()
                 
                 # 檢查是否已存在
-                sql = "SELECT F_SeqNo, F_ID FROM dbo.C_S_Flag WHERE F_Type = ? AND F_Name = ?"
+                sql = "SELECT F_SeqNo, F_ID FROM dbo.S_Flag WHERE F_Type = ? AND F_Name = ?"
                 self.cursor.execute(sql, ('GPU 規格參數', category_name))
                 existing = self.cursor.fetchone()
                 
@@ -132,7 +139,7 @@ class Database:
                     return type('Category', (), {"F_SeqNo": existing[0], "F_ID": existing[1], "F_Name": category_name})
                 
                 # 獲取最大 ID
-                self.cursor.execute("SELECT MAX(CAST(F_ID AS INT)) FROM dbo.C_S_Flag WHERE F_Type = ?", ('GPU 規格參數',))
+                self.cursor.execute("SELECT MAX(CAST(F_ID AS INT)) FROM dbo.S_Flag WHERE F_Type = ?", ('GPU 規格參數',))
                 max_id = self.cursor.fetchone()[0]
                 
                 next_id = "1"
@@ -141,7 +148,7 @@ class Database:
                 
                 # 創建新紀錄
                 sql = """
-                    INSERT INTO dbo.C_S_Flag (
+                    INSERT INTO dbo.S_Flag (
                         F_Createdate, F_UpdateTime, F_Stat, F_Keyin, F_Security, 
                         F_Type, F_ID, F_Name
                     ) OUTPUT INSERTED.F_SeqNo
@@ -169,6 +176,8 @@ class Database:
         """創建規格記錄"""
         def _create_spec():
             try:
+                self.cursor = self.conn.cursor()
+
                 now = datetime.now()
                 
                 sql = """
@@ -208,6 +217,8 @@ class Database:
         """創建評測記錄"""
         def _create_review():
             try:
+                self.cursor = self.conn.cursor()
+
                 now = datetime.now()
                 
                 sql = """
@@ -244,6 +255,8 @@ class Database:
         """創建評測數據記錄"""
         def _create_review_data():
             try:
+                self.cursor = self.conn.cursor()
+
                 sql = """
                     INSERT INTO dbo.C_Product_Review_Data (
                         F_Review_ID, F_Data_Type, F_Data_Key, F_Data_Value, F_Data_Unit, F_Product_Name
@@ -273,12 +286,16 @@ class Database:
         return await self.run_db_query(_create_review_data)
         
     async def create_product_with_specs(self, product_data, specs_data):
+        
         """在單一事務中創建產品及其規格"""
         def _create_product_with_specs():
             try:
+                self.cursor = self.conn.cursor()
+                if self.cursor is None:
+                    raise Exception("Database cursor is not initialized. Check database connection.")
+                
                 # 開始事務
                 self.conn.autocommit = False
-                
                 # 1. 創建產品
                 now = datetime.now()
                 insert_data = {
@@ -294,12 +311,12 @@ class Database:
                 
                 columns = ', '.join(insert_data.keys())
                 placeholders = ', '.join(['?' for _ in insert_data])
-                
+
                 sql = f"INSERT INTO dbo.C_Product ({columns}) OUTPUT INSERTED.F_SeqNo VALUES ({placeholders})"
-                
+
                 self.cursor.execute(sql, list(insert_data.values()))
                 product_id = self.cursor.fetchone()[0]
-                
+
                 # 2. 處理所有規格類別
                 categories = {}
                 for spec in specs_data:
@@ -307,7 +324,7 @@ class Database:
                     if category_name not in categories:
                         # 檢查是否已存在
                         self.cursor.execute(
-                            "SELECT F_SeqNo, F_ID FROM dbo.C_S_Flag WHERE F_Type = ? AND F_Name = ?",
+                            "SELECT F_SeqNo, F_ID FROM dbo.S_Flag WHERE F_Type = ? AND F_Name = ?",
                             ('GPU 規格參數', category_name)
                         )
                         existing = self.cursor.fetchone()
@@ -318,7 +335,7 @@ class Database:
                         else:
                             # 創建新類別
                             self.cursor.execute(
-                                "SELECT MAX(CAST(F_ID AS INT)) FROM dbo.C_S_Flag WHERE F_Type = ?", 
+                                "SELECT MAX(CAST(F_ID AS INT)) FROM dbo.S_Flag WHERE F_Type = ?", 
                                 ('GPU 規格參數',)
                             )
                             max_id = self.cursor.fetchone()[0]
@@ -328,7 +345,7 @@ class Database:
                                 next_id = str(int(max_id) + 1)
                             
                             self.cursor.execute("""
-                                INSERT INTO dbo.C_S_Flag (
+                                INSERT INTO dbo.S_Flag (
                                     F_Createdate, F_UpdateTime, F_Stat, F_Keyin, F_Security, 
                                     F_Type, F_ID, F_Name
                                 ) OUTPUT INSERTED.F_ID
@@ -337,19 +354,18 @@ class Database:
                                 now, now, '1', 'admin', 'S',
                                 'GPU 規格參數', next_id, category_name
                             ))
-                            
-                            category_id = self.cursor.fetchone()[0]
-                            categories[category_name] = category_id
-                            logger.info(f"創建新規格類別: {category_name} (ID: {category_id})")
-                
+                           
                 # 3. 創建所有規格
                 specs_count = 0
                 for spec in specs_data:
-                    category_id = categories.get(spec['category'])
-                    if not category_id:
-                        logger.warning(f"找不到規格類別 {spec['category']}，跳過規格 {spec['name']}")
-                        continue
-                    
+                    self.cursor.execute(
+                        "SELECT F_ID FROM dbo.S_Flag WHERE F_Type = ? AND F_Name = ?",
+                        ('GPU 規格參數', spec['category'])
+                    )
+
+                    result = self.cursor.fetchone()
+                    category_id = result[0]
+                    print(f'category_id : {category_id}')
                     self.cursor.execute("""
                         INSERT INTO dbo.C_Specs_Database (
                             F_Createdate, F_UpdateTime, F_Stat, F_Keyin, F_Security, F_Owner,

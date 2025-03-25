@@ -5,7 +5,6 @@ import aiohttp  # 改用 aiohttp 代替 requests
 import asyncio
 import time
 import random
-from tqdm import tqdm
 from urllib.parse import urljoin
 from colorama import init, Fore, Style
 from dotenv import load_dotenv
@@ -120,7 +119,9 @@ class GPUScraper:
         
         # 解析產品詳情
         product_data, specs_data = GPUParser.parse_product_detail(html, gpu['url'])
-        
+        # print(f'product_data: {product_data}')
+        # print(f'specs_data: {specs_data}')
+
         # 解析主板部分
         board_data = GPUParser.parse_boards_section(html)
         
@@ -178,6 +179,7 @@ class GPUScraper:
                     # 處理所有主板
                     if board_data:
                         for board in board_data:
+
                             try:
                                 # 如果主板有自己的URL，爬取詳細規格
                                 board_specs = {}
@@ -185,13 +187,15 @@ class GPUScraper:
                                     board_url = board['url']
                                     board_html = await self.fetch_url(board_url, absolute=False)
                                     if board_html:
-                                        board_specs = GPUParser.parse_board_details(board_html, board_url)
+                                        board_specs = GPUParser.parse_product_detail(board_html, board_url)
                                         logger.info(f"成功爬取主板 {board.get('name', '未知主板')} 的詳細規格")
                                 
                                 # 添加規格到主板數據
                                 if board_specs:
                                     board['specs'] = board_specs
-                                
+
+                                # print(f'board: {board}')
+
                                 # 確保有廠商資訊
                                 if 'vendor' not in board and 'name' in board:
                                     # 嘗試從名稱中提取廠商
@@ -201,8 +205,12 @@ class GPUScraper:
                                     else:
                                         board['vendor'] = "Unknown"
                                 
+                               
+
+                                product_data = convert_to_product_data(board)
+                                specs_data = convert_to_specs_data(board)
                                 # 存儲主板基本資料
-                                board_id = await self.storage_manager.store_board(product_id, board)
+                                board_id = await self.storage_manager.store_product_complete(product_data,specs_data)
                                 
                                 # 如果有評測連結，加入評測佇列
                                 if board_id and 'review_url' in board and board['review_url']:
@@ -299,6 +307,7 @@ class GPUScraper:
             # 產品處理工作協程
             for i in range(3):  # 同時處理 3 個產品
                 worker = asyncio.create_task(self.product_worker())
+                print(f'worker: {worker}')  # 输出: worker: John Doe
                 product_workers.append(worker)
                 logger.info(f"啟動產品工作協程 #{i+1}")
             
@@ -339,6 +348,26 @@ class GPUScraper:
             await self.db.disconnect()
             logger.info("資料庫連接已關閉")
 
+def convert_to_product_data(board):
+    # 取出基本資訊
+    base_info, specs_list = board['specs']
+
+    # 整理規格資訊
+    description_parts = []
+    for spec in specs_list:
+        description_parts.append(f"{spec['name']}: {spec['value']}")
+
+    # 組合 `product_data`
+    product_data = {
+        **base_info,  # 直接合併基本資訊
+        'F_Desc': ' | '.join(description_parts)  # 規格轉成描述
+    }
+    return product_data
+
+def convert_to_specs_data(board):
+    _, specs_list = board['specs']  # 取得規格清單
+    return specs_list  # 直接回傳規格列表
+
 # 入口點
 if __name__ == "__main__":
     try:
@@ -350,7 +379,7 @@ if __name__ == "__main__":
         
         # 執行爬蟲
         scraper = GPUScraper()
-        asyncio.run(scraper.run(limit=args.limit))
+        asyncio.run(scraper.run(1))
     except KeyboardInterrupt:
         print(f"{Fore.YELLOW}使用者中斷爬蟲程序{Style.RESET_ALL}")
         logger.info("使用者中斷爬蟲程序")

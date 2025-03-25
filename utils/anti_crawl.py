@@ -23,6 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class AntiCrawl:
+    
     def __init__(self):
         self.ua = UserAgent()
         self.min_delay = 3
@@ -32,8 +33,9 @@ class AntiCrawl:
     
     def get_headers(self):
         """生成隨機 User-Agent 和其他頭部信息"""
+        print(f'使用者代理: {self.ua.getEdge}')
         return {
-            'User-Agent': self.ua.random,
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',

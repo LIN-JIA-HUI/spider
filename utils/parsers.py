@@ -169,72 +169,89 @@ class GPUParser:
             
             # 獲取規格區塊
             sections = soup.find_all(class_='sectioncontainer')
-            
-            for section in sections:
-                # 跳過相對性能區塊
-                if section.find(class_='gpudb-relative-performance'):
-                    continue
-                
-                # 嘗試獲取區塊標題
-                header = section.find(['h2'])
-                if not header:
-                    continue
-                
-                category_name = header.get_text(strip=True)
-                
-                # 嘗試查找定義列表 (dl)
-                definition_lists = section.find_all('dl')
-                for dl in definition_lists:
+            with open('sections_output.txt', 'w', encoding='utf-8') as f:
+            # 首先输出 sections 的总数
+                f.write(f'Total sections found: {len(sections)}\n\n')
+
+                # 然后遍历 sections，输出每个 section 的内容
+                for idx, container in enumerate(sections):
+                    sections_in_container = container.find_all('section')  # 查找当前 container 中的所有 section
+                    for section_idx,section in enumerate(sections_in_container):
+                        # 跳過相對性能區塊
+                        f.write(f'Section {idx + 1}, Section {section_idx + 1}:')
+                        f.write(section.prettify()) 
+                        f.write('\n')
+
+                        if section.find(class_='details jsonly gpudb-relative-performance'):
+                            f.write('遇到圖表')
+                            f.write('\n')
+                            continue
+                        
+                        # 嘗試獲取區塊標題
+                        header = section.find(['h2'])
+                        if header:
+                            f.write(f'Found header: {header.text}')
+                            f.write('\n')
+                        else:
+                            f.write(f'Not header')
+                            f.write('\n')
+                            continue
+                        
+                        category_name = header.get_text(strip=True)
+                        
+                        # 嘗試查找定義列表 (dl)
+                        definition_lists = section.find_all('dl')
+
+                        for dl in definition_lists:
+                            
+                            # 獲取所有的定義術語和描述
+                            terms = dl.find_all('dt')
+                            descriptions = dl.find_all('dd')
+                            # 配對處理
+                            for i in range(min(len(terms), len(descriptions))):
+                                spec_name = terms[i].get_text(strip=True)
+
+                                # 處理描述中可能的鏈接
+                                spec_value = ""
+                                for content in descriptions[i].contents:
+                                    if hasattr(content, 'name') and content.name == 'a':
+                                        spec_value += content.get_text(strip=True)
+                                    elif isinstance(content, str):
+                                        spec_value += content.strip()
+                                
+                                spec_value = spec_value.strip()
+                                
+                                if spec_name and spec_value:
+                                    specs_data.append({
+                                        'category': category_name,
+                                        'name': spec_name,
+                                        'value': spec_value
+                                    })
+                            # 處理表格數據 (如有)
+                            tables = section.find_all('table')
+                            for table in tables:
+                                headers = []
+                                thead = table.find('thead')
+                                if thead:
+                                    header_cells = thead.find_all('th')
+                                    headers = [cell.get_text(strip=True) for cell in header_cells]
+                                
+                                tbody = table.find('tbody')
+                                if tbody:
+                                    rows = tbody.find_all('tr')
+                                    for row in rows:
+                                        cells = row.find_all(['td', 'th'])
+                                        if len(cells) > 1:
+                                            spec_name = cells[0].get_text(strip=True)
+                                            spec_value = cells[1].get_text(strip=True)
+                                            if spec_name and spec_value:
+                                                specs_data.append({
+                                                    'category': category_name,
+                                                    'name': spec_name,
+                                                    'value': spec_value
+                                                })
                     
-                    # 獲取所有的定義術語和描述
-                    terms = dl.find_all('dt')
-                    descriptions = dl.find_all('dd')
-                    
-                    # 配對處理
-                    for i in range(min(len(terms), len(descriptions))):
-                        spec_name = terms[i].get_text(strip=True)
-                        
-                        # 處理描述中可能的鏈接
-                        spec_value = ""
-                        for content in descriptions[i].contents:
-                            if hasattr(content, 'name') and content.name == 'a':
-                                spec_value += content.get_text(strip=True)
-                            elif isinstance(content, str):
-                                spec_value += content.strip()
-                        
-                        spec_value = spec_value.strip()
-                        
-                        if spec_name and spec_value:
-                            specs_data.append({
-                                'category': category_name,
-                                'name': spec_name,
-                                'value': spec_value
-                            })
-                    # 處理表格數據 (如有)
-                    tables = section.find_all('table')
-                    for table in tables:
-                        headers = []
-                        thead = table.find('thead')
-                        if thead:
-                            header_cells = thead.find_all('th')
-                            headers = [cell.get_text(strip=True) for cell in header_cells]
-                        
-                        tbody = table.find('tbody')
-                        if tbody:
-                            rows = tbody.find_all('tr')
-                            for row in rows:
-                                cells = row.find_all(['td', 'th'])
-                                if len(cells) > 1:
-                                    spec_name = cells[0].get_text(strip=True)
-                                    spec_value = cells[1].get_text(strip=True)
-                                    if spec_name and spec_value:
-                                        specs_data.append({
-                                            'category': category_name,
-                                            'name': spec_name,
-                                            'value': spec_value
-                                        })
-            
-            logger.info(f"解析 GPU {product_data.get('F_Product', 'Unknown')} 完成，找到 {len(specs_data)} 條規格")
+                    logger.info(f"解析 GPU {product_data.get('F_Product', 'Unknown')} 完成，找到 {len(specs_data)} 條規格")
         except Exception as e:
             logger.error(f"解析產品詳情時出錯: {str(e)}")
         
@@ -375,6 +392,7 @@ class GPUParser:
         except Exception as e:
             logger.error(f"解析主板區域時出錯: {str(e)}")
         
+
         return board_data
     
     @staticmethod
@@ -428,6 +446,7 @@ class GPUParser:
     
     @staticmethod
     def parse_review_content(html, review_type):
+
         """解析評測內容"""
         soup = BeautifulSoup(html, 'html.parser')
         content = {}
@@ -877,3 +896,4 @@ class GPUParser:
             logger.error(f"解析評測內容時出錯: {str(e)}")
         
         return content, review_data
+    
