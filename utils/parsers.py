@@ -451,6 +451,7 @@ class GPUParser:
         soup = BeautifulSoup(html, 'html.parser')
         content = {}
         review_data = []
+        review_specs_data = []
         images_data = []  # 存儲圖片數據
         
         try:
@@ -590,6 +591,12 @@ class GPUParser:
                                         'data_value': value,
                                         'data_unit': unit
                                     })
+                                    review_specs_data.append({
+                                        'category': 'Physical Properties',
+                                        'name': f'{review_type} {i}',
+                                        'value': f'{value} {unit}'
+                                    })
+
                             
                             review_data.extend(data_entries)
                             
@@ -630,12 +637,19 @@ class GPUParser:
                                     unit = match.group(2) if match.group(2) else ""
                                     
                                     review_data.append({
-                                        'data_type': 'Overclock',
+                                        'data_type': 'TDP Compare',
                                         'data_key': header_name,
                                         'data_value': value,
                                         'data_unit': unit,
                                         'product_name': product_name
                                     })
+                                    review_specs_data.append({
+                                        'category': 'TDP Compare',
+                                        'name': header_name,
+                                        'value': value
+                                    })
+                                    logger.info(f"成功提取TDP Compare數據: {header_name} {value} {unit}")
+                                
             
             # ========== 改進的電路板分析數據提取 ==========
             elif "Circuit" in review_type or "PCB" in review_type or "Board Analysis" in review_type:
@@ -663,6 +677,11 @@ class GPUParser:
                             'data_unit': 'phase',
                             'product_name': content.get('title', '')
                         })
+                        review_specs_data.append({
+                            'category': 'GPU',
+                            'name': 'GPUMEMCount',
+                            'value': gpu_phase_match.group(1)
+                        })
                         logger.info(f"成功匹配GPU相數: {gpu_phase_match.group(1)}")
                         break
                 
@@ -688,6 +707,11 @@ class GPUParser:
                             'data_value': gpu_controller_match.group(1),
                             'data_unit': '',
                             'product_name': content.get('title', '')
+                        })
+                        review_specs_data.append({
+                            'category': 'GPU',
+                            'name': 'GPUControllerModel',
+                            'value': gpu_controller_match.group(1)
                         })
                         logger.info(f"成功匹配GPU控制器: {gpu_controller_match.group(1)}")
                         break
@@ -720,6 +744,11 @@ class GPUParser:
                                 'data_unit': '',
                                 'product_name': content.get('title', '')
                             })
+                            review_specs_data.append({
+                                'category': 'GPU',
+                                'name': 'GPUMOSSpec',
+                                'value': mos_spec
+                            })
                             logger.info(f"成功匹配GPU MOS規格: {mos_spec}")
                             break
                     
@@ -746,6 +775,11 @@ class GPUParser:
                                 'data_unit': 'phase',
                                 'product_name': content.get('title', '')
                             })
+                            review_specs_data.append({
+                                'category': 'Memory',
+                                'name': 'MemoryMEMCount',
+                                'value': mem_phase_match.group(1)
+                            })
                             logger.info(f"成功匹配記憶體相數: {mem_phase_match.group(1)}")
                             break
                     
@@ -771,6 +805,11 @@ class GPUParser:
                                 'data_unit': '',
                                 'product_name': content.get('title', '')
                             })
+                            review_specs_data.append({
+                                'category': 'Memory',
+                                'name': 'MemoryControllerModel',
+                                'value': mem_controller_match.group(1)
+                            })
                             logger.info(f"成功匹配記憶體控制器: {mem_controller_match.group(1)}")
                             break
                     
@@ -778,33 +817,38 @@ class GPUParser:
                         logger.warning(f"未找到記憶體控制器型號資料，評測標題: {content.get('title', '')}")
                     
                     # 使用多種模式匹配 Memory 芯片型號和速率
-                    mem_chip_patterns = [
-                        r'memory\s+chips\s+are\s+made\s+by\s+(\w+),\s+and\s+bear\s+the\s+model\s+number\s+([\w\-]+),\s+they\s+are\s+rated\s+for\s+(\d+)\s+Gbps',
-                        r'(\w+)\s+([\w\-]+)\s+memory\s+chips.*?rated\s+(?:at|for)\s+(\d+)\s+Gbps',
-                        r'memory\s+chips\s+(?:are|from)\s+(\w+)\s+([\w\-]+).*?(\d+)\s+Gbps'
-                    ]
+                    # mem_chip_patterns = [
+                    #     r'memory\s+chips\s+are\s+made\s+by\s+(\w+),\s+and\s+bear\s+the\s+model\s+number\s+([\w\-]+),\s+they\s+are\s+rated\s+for\s+(\d+)\s+Gbps',
+                    #     r'(\w+)\s+([\w\-]+)\s+memory\s+chips.*?rated\s+(?:at|for)\s+(\d+)\s+Gbps',
+                    #     r'memory\s+chips\s+(?:are|from)\s+(\w+)\s+([\w\-]+).*?(\d+)\s+Gbps'
+                    # ]
                     
-                    mem_chip_found = False
-                    for pattern in mem_chip_patterns:
-                        mem_chip_match = re.search(pattern, content['body'], re.IGNORECASE)
-                        if mem_chip_match:
-                            mem_chip_found = True
-                            manufacturer = mem_chip_match.group(1)
-                            model = mem_chip_match.group(2)
-                            speed = mem_chip_match.group(3)
+                    # mem_chip_found = False
+                    # for pattern in mem_chip_patterns:
+                    #     mem_chip_match = re.search(pattern, content['body'], re.IGNORECASE)
+                    #     if mem_chip_match:
+                    #         mem_chip_found = True
+                    #         manufacturer = mem_chip_match.group(1)
+                    #         model = mem_chip_match.group(2)
+                    #         speed = mem_chip_match.group(3)
                             
-                            review_data.append({
-                                'data_type': 'Memory',
-                                'data_key': '記憶體型號',
-                                'data_value': f"{manufacturer} {model} {speed}",
-                                'data_unit': 'Gbps',
-                                'product_name': content.get('title', '')
-                            })
-                            logger.info(f"成功匹配記憶體晶片型號: {manufacturer} {model} {speed}Gbps")
-                            break
+                    #         review_data.append({
+                    #             'data_type': 'Memory',
+                    #             'data_key': '記憶體型號',
+                    #             'data_value': f"{manufacturer} {model} {speed}",
+                    #             'data_unit': 'Gbps',
+                    #             'product_name': content.get('title', '')
+                    #         })
+                    #         review_specs_data.append({
+                    #             'category': 'Memory',
+                    #             'name': 'MemoryControllerModel',
+                    #             'value': f"{manufacturer} {model} {speed}"
+                    #         })
+                    #         logger.info(f"成功匹配記憶體晶片型號: {manufacturer} {model} {speed}Gbps")
+                    #         break
                     
-                    if not mem_chip_found:
-                        logger.warning(f"未找到記憶體晶片型號資料，評測標題: {content.get('title', '')}")
+                    # if not mem_chip_found:
+                    #     logger.warning(f"未找到記憶體晶片型號資料，評測標題: {content.get('title', '')}")
                     
                     # 使用多種模式匹配 Memory MOS規格
                     mem_mos_patterns = [
@@ -824,6 +868,11 @@ class GPUParser:
                                 'data_value': mem_mos_match.group(1),
                                 'data_unit': '',
                                 'product_name': content.get('title', '')
+                            })
+                            review_specs_data.append({
+                                'category': 'Memory',
+                                'name': 'MemoryMOSSpec',
+                                'value': mem_mos_match.group(1)
                             })
                             logger.info(f"成功匹配記憶體MOS規格: {mem_mos_match.group(1)}")
                             break
@@ -846,11 +895,16 @@ class GPUParser:
                     if weight_match:
                         weight_found = True
                         review_data.append({
-                            'data_type': 'Weight',
+                            'data_type': 'Physical Properties',
                             'data_key': 'weight',
                             'data_value': weight_match.group(1),
                             'data_unit': 'g',
                             'product_name': content.get('title', '')
+                        })
+                        review_specs_data.append({
+                            'category': 'Physical Properties',
+                            'name': 'weight',
+                            'value': weight_match.group(1)
                         })
                         logger.info(f"成功匹配產品重量: {weight_match.group(1)}g")
                         break
@@ -887,6 +941,11 @@ class GPUParser:
                             'data_unit': 'count',
                             'product_name': content.get('title', '')
                         })
+                        review_specs_data.append({
+                            'category': 'Physical Properties',
+                            'name': 'Pipe',
+                            'value': heatpipe_count
+                        })
                         logger.info(f"成功匹配熱管數量: {heatpipe_count}")
                         break
                 
@@ -895,5 +954,5 @@ class GPUParser:
         except Exception as e:
             logger.error(f"解析評測內容時出錯: {str(e)}")
         
-        return content, review_data
+        return content, review_data, review_specs_data
     

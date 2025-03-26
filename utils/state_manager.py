@@ -224,15 +224,19 @@ class StorageManager:
                 )
                 
                 # 儲存結構化數據
-                for data_item in content['data']:
-                    await self.db.create_review_data(
-                        review.F_SeqNo,
-                        data_item.get('data_type', content['type']),
-                        data_item.get('data_key', ''),
-                        data_item.get('data_value', ''),
-                        data_item.get('data_unit', ''),
-                        data_item.get('product_name', board_name)
-                    )
+                # for data_item in content['data']:
+                #     await self.db.create_review_data(
+                #         review.F_SeqNo,
+                #         data_item.get('data_type', content['type']),
+                #         data_item.get('data_key', ''),
+                #         data_item.get('data_value', ''),
+                #         data_item.get('data_unit', ''),
+                #         data_item.get('product_name', board_name)
+                #     )
+                # 新增: 儲存特殊評測規格數據到C_Specs_Database
+                if 'specs_data' in content and content['specs_data']:
+                    await self._store_all_specs(board_id, content['specs_data'])
+                    logger.info(f"成功將評測{content['type']}的規格數據存儲到{board_id}")
                 
                 # 更新狀態
                 self.state.add_review(product_id, board_name)  # 仍然記錄與GPU的關聯

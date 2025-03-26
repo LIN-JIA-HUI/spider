@@ -145,11 +145,12 @@ class GPUScraper:
             option_html = await self.fetch_url(option_url, absolute=False)
             
             if option_html:
-                content, review_data = GPUParser.parse_review_content(option_html, option['text'])
+                content, review_data, specs_data = GPUParser.parse_review_content(option_html, option['text'])
                 review_contents.append({
                     'type': option['text'],
                     'content': content,
-                    'data': review_data
+                    'data': review_data,
+                    'specs_data': specs_data
                 })
         
         return review_contents
