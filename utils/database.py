@@ -30,9 +30,10 @@ class Database:
             trusted_connection = os.getenv('DB_TRUSTED_CONNECTION', 'yes')
             
             # 使用 Windows 身份驗證連接
-
-
             connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
+
+            # 使用 sql server 連接
+            # connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
 
             conn = pyodbc.connect(connection_string)
             
@@ -79,47 +80,71 @@ class Database:
         return await self.run_db_query(_execute_transaction)
     
     async def create_product(self, product_data):
-        """創建產品記錄"""
-        def _create_product():
+        """創建產品或更新已存在產品"""
+        def _create_or_update_product():
             try:
                 self.cursor = self.conn.cursor()
-
                 now = datetime.now()
                 
-                # 準備插入數據
-                insert_data = {
-                    "F_Createdate": now,
-                    "F_UpdateTime": now,
-                    "F_Stat": "1",
-                    "F_Keyin": "admin",
-                    "F_Security": "S",
-                    "F_Owner": "admin",
-                    "F_BU": "GNP",
-                    **product_data
-                }
+                # 首先檢查產品是否已存在
+                check_sql = "SELECT F_SeqNo, F_Createdate FROM dbo.C_Product WHERE F_Product = ?"
+                self.cursor.execute(check_sql, [product_data.get("F_Product", "")])
+                existing = self.cursor.fetchone()
                 
-                # 構建SQL插入語句
-                columns = ', '.join(insert_data.keys())
-                placeholders = ', '.join(['?' for _ in insert_data])
-                
-                sql = f"INSERT INTO dbo.C_Product ({columns}) OUTPUT INSERTED.F_SeqNo VALUES ({placeholders})"
-                
-                # 執行插入並獲取新生成的 ID
-                self.cursor.execute(sql, list(insert_data.values()))
-                new_id = self.cursor.fetchone()[0]
-                self.conn.commit()
-                
-                # 構建返回的產品對象
-                product = type('Product', (), {"F_SeqNo": new_id, "F_Product": product_data.get("F_Product", "")})
-                
-                logger.info(f"產品記錄創建成功: {product.F_Product}, ID: {new_id}")
-                return product
+                if existing:
+                    # 產品已存在，執行更新
+                    product_id = existing[0]
+                    
+                    # 準備更新數據 - 只更新 F_UpdateTime，保留原始 F_Createdate
+                    update_data = {
+                        "F_UpdateTime": now,
+                        **{k: v for k, v in product_data.items() if k != "F_Createdate"}  # 排除 F_Createdate
+                    }
+                    
+                    # 構建SQL更新語句
+                    update_pairs = ', '.join([f"{key} = ?" for key in update_data.keys()])
+                    sql = f"UPDATE dbo.C_Product SET {update_pairs} WHERE F_SeqNo = ?"
+                    
+                    # 執行更新
+                    params = list(update_data.values()) + [product_id]
+                    self.cursor.execute(sql, params)
+                    self.conn.commit()
+                    
+                    logger.info(f"產品記錄更新成功: {product_data.get('F_Product', '')}, ID: {product_id}")
+                    product = type('Product', (), {"F_SeqNo": product_id, "F_Product": product_data.get("F_Product", "")})
+                    return product
+                else:
+                    # 產品不存在，執行插入
+                    insert_data = {
+                        "F_Createdate": now,  # 新記錄設置創建時間
+                        "F_UpdateTime": now,  # 新記錄也設置更新時間
+                        "F_Stat": "1",
+                        "F_Keyin": "admin",
+                        "F_Security": "S",
+                        "F_Owner": "admin",
+                        "F_BU": "GNP",
+                        **product_data
+                    }
+                    
+                    columns = ', '.join(insert_data.keys())
+                    placeholders = ', '.join(['?' for _ in insert_data])
+                    
+                    sql = f"INSERT INTO dbo.C_Product ({columns}) OUTPUT INSERTED.F_SeqNo VALUES ({placeholders})"
+                    
+                    self.cursor.execute(sql, list(insert_data.values()))
+                    new_id = self.cursor.fetchone()[0]
+                    self.conn.commit()
+                    
+                    product = type('Product', (), {"F_SeqNo": new_id, "F_Product": product_data.get("F_Product", "")})
+                    
+                    logger.info(f"產品記錄創建成功: {product.F_Product}, ID: {new_id}")
+                    return product
             except Exception as e:
                 self.conn.rollback()
-                logger.error(f"產品記錄創建失敗: {str(e)}")
+                logger.error(f"產品記錄創建/更新失敗: {str(e)}")
                 raise
         
-        return await self.run_db_query(_create_product)
+        return await self.run_db_query(_create_or_update_product)
     
     async def create_spec_category(self, category_name):
         """創建或獲取規格類別"""
@@ -213,65 +238,104 @@ class Database:
         
         return await self.run_db_query(_create_spec)
     
-    async def create_review(self, product_id, review_type, title, desc):
-        """創建評測記錄"""
-        def _create_review():
+    async def create_review(self, board_id, review_type, title, content):
+        """創建或更新評測記錄"""
+        def _create_or_update_review():
             try:
                 self.cursor = self.conn.cursor()
-
                 now = datetime.now()
                 
-                sql = """
-                    INSERT INTO dbo.C_Product_Review (
-                        F_Createdate, F_UpdateTime, F_Stat, F_Keyin, F_Security, F_Owner,
-                        F_Master_Table, F_Master_ID, F_Type, F_Title, F_Desc
-                    ) OUTPUT INSERTED.F_SeqNo
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                # 檢查是否已存在相同的評測
+                check_sql = """
+                    SELECT F_SeqNo, F_Createdate FROM dbo.C_Product_Review 
+                    WHERE F_Master_ID = ? AND F_Type = ? AND F_Title = ?
                 """
+                self.cursor.execute(check_sql, (board_id, review_type, title))
+                existing = self.cursor.fetchone()
                 
-                self.cursor.execute(sql, (
-                    now, now, '1', 'admin', 'S', 'admin',
-                    'C_Product', str(product_id), review_type, title, desc
-                ))
+                if existing:
+                    # 已存在，進行更新 - 只更新內容和更新時間，保留創建時間
+                    review_id = existing[0]
+                    update_sql = """
+                        UPDATE dbo.C_Product_Review 
+                        SET F_UpdateTime = ?, F_Desc = ?, F_Type = ?
+                        WHERE F_SeqNo = ?
+                    """
+                    self.cursor.execute(update_sql, (now, content, review_type, review_id))
+                    logger.info(f"評測記錄更新成功: {title}, 主板ID: {board_id}")
+                else:
+                    # 不存在，創建新記錄
+                    sql = """
+                        INSERT INTO dbo.C_Product_Review (
+                            F_Createdate, F_UpdateTime, F_Stat, F_Keyin, F_Security, F_Owner,
+                            F_Master_Table, F_Master_ID, F_Type, F_Title, F_Desc
+                        ) OUTPUT INSERTED.F_SeqNo
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    
+                    self.cursor.execute(sql, (
+                        now, now, '1', 'admin', 'S', 'admin',
+                        'C_Product', str(board_id), review_type, title, content
+                    ))
+                    
+                    review_id = self.cursor.fetchone()[0]
+                    logger.info(f"評測記錄創建成功: {title}, 主板ID: {board_id}")
                 
-                new_id = self.cursor.fetchone()[0]
                 self.conn.commit()
                 
-                logger.info(f"評測記錄創建成功: {title}, 產品ID: {product_id}")
-                
                 return type('Review', (), {
-                    "F_SeqNo": new_id, 
-                    "F_Type": review_type,
-                    "F_Title": title
+                    "F_SeqNo": review_id,
+                    "F_Master_ID": board_id,
+                    "F_Type": review_type
                 })
             except Exception as e:
                 self.conn.rollback()
-                logger.error(f"評測記錄創建失敗: {str(e)}")
+                logger.error(f"評測記錄創建/更新失敗: {str(e)}")
                 raise
         
-        return await self.run_db_query(_create_review)
+        return await self.run_db_query(_create_or_update_review)
     
     async def create_review_data(self, review_id, data_type, data_key, data_value, data_unit, product_name):
-        """創建評測數據記錄"""
-        def _create_review_data():
+        """創建或更新評測數據記錄"""
+        def _create_or_update_review_data():
             try:
                 self.cursor = self.conn.cursor()
-
-                sql = """
-                    INSERT INTO dbo.C_Product_Review_Data (
-                        F_Review_ID, F_Data_Type, F_Data_Key, F_Data_Value, F_Data_Unit, F_Product_Name
-                    ) OUTPUT INSERTED.F_SeqNo
-                    VALUES (?, ?, ?, ?, ?, ?)
+                
+                # 先檢查是否已存在相同的評測數據
+                check_sql = """
+                    SELECT F_SeqNo FROM dbo.C_Product_Review_Data 
+                    WHERE F_Review_ID = ? AND F_Data_Type = ? AND F_Data_Key = ?
                 """
+                self.cursor.execute(check_sql, (review_id, data_type, data_key))
+                existing = self.cursor.fetchone()
                 
-                self.cursor.execute(sql, (
-                    review_id, data_type, data_key, data_value, data_unit, product_name
-                ))
+                if existing:
+                    # 已存在，進行更新
+                    update_sql = """
+                        UPDATE dbo.C_Product_Review_Data 
+                        SET F_Data_Value = ?, F_Data_Unit = ?, F_Product_Name = ?
+                        WHERE F_SeqNo = ?
+                    """
+                    self.cursor.execute(update_sql, (data_value, data_unit, product_name, existing[0]))
+                    new_id = existing[0]
+                    logger.debug(f"評測數據記錄更新成功: {data_key}={data_value}, 評測ID: {review_id}")
+                else:
+                    # 不存在，創建新記錄
+                    sql = """
+                        INSERT INTO dbo.C_Product_Review_Data (
+                            F_Review_ID, F_Data_Type, F_Data_Key, F_Data_Value, F_Data_Unit, F_Product_Name
+                        ) OUTPUT INSERTED.F_SeqNo
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """
+                    
+                    self.cursor.execute(sql, (
+                        review_id, data_type, data_key, data_value, data_unit, product_name
+                    ))
+                    
+                    new_id = self.cursor.fetchone()[0]
+                    logger.debug(f"評測數據記錄創建成功: {data_key}={data_value}, 評測ID: {review_id}")
                 
-                new_id = self.cursor.fetchone()[0]
                 self.conn.commit()
-                
-                logger.debug(f"評測數據記錄創建成功: {data_key}={data_value}, 評測ID: {review_id}")
                 
                 return type('ReviewData', (), {
                     "F_SeqNo": new_id, 
@@ -280,58 +344,78 @@ class Database:
                 })
             except Exception as e:
                 self.conn.rollback()
-                logger.error(f"評測數據記錄創建失敗: {str(e)}")
+                logger.error(f"評測數據記錄創建/更新失敗: {str(e)}")
                 raise
         
-        return await self.run_db_query(_create_review_data)
+        return await self.run_db_query(_create_or_update_review_data)
         
     async def create_product_with_specs(self, product_data, specs_data):
-        
-        """在單一事務中創建產品及其規格"""
+        """創建或更新產品及其規格"""
         def _create_product_with_specs():
             try:
                 self.cursor = self.conn.cursor()
-                if self.cursor is None:
-                    raise Exception("Database cursor is not initialized. Check database connection.")
-                
-                # 開始事務
-                self.conn.autocommit = False
-                # 1. 創建產品
+                self.conn.autocommit = False  # 開始事務
                 now = datetime.now()
-                insert_data = {
-                    "F_Createdate": now,
-                    "F_UpdateTime": now,
-                    "F_Stat": "1",
-                    "F_Keyin": "admin",
-                    "F_Security": "S",
-                    "F_Owner": "admin",
-                    "F_BU": "GNP",
-                    **product_data
-                }
                 
-                columns = ', '.join(insert_data.keys())
-                placeholders = ', '.join(['?' for _ in insert_data])
-
-                sql = f"INSERT INTO dbo.C_Product ({columns}) OUTPUT INSERTED.F_SeqNo VALUES ({placeholders})"
-
-                self.cursor.execute(sql, list(insert_data.values()))
-                product_id = self.cursor.fetchone()[0]
-
-                # 2. 處理所有規格類別
+                # 1. 檢查產品是否已存在
+                check_sql = "SELECT F_SeqNo FROM dbo.C_Product WHERE F_Product = ?"
+                self.cursor.execute(check_sql, [product_data.get("F_Product", "")])
+                existing = self.cursor.fetchone()
+                
+                if existing:
+                    # 產品已存在，更新產品
+                    product_id = existing[0]
+                    
+                    update_data = {
+                        "F_UpdateTime": now,
+                        **product_data
+                    }
+                    
+                    update_pairs = ', '.join([f"{key} = ?" for key in update_data.keys()])
+                    sql = f"UPDATE dbo.C_Product SET {update_pairs} WHERE F_SeqNo = ?"
+                    
+                    params = list(update_data.values()) + [product_id]
+                    self.cursor.execute(sql, params)
+                    
+                    logger.info(f"產品記錄更新成功: {product_data.get('F_Product', '')}, ID: {product_id}")
+                else:
+                    # 產品不存在，創建新產品
+                    insert_data = {
+                        "F_Createdate": now,
+                        "F_UpdateTime": now,
+                        "F_Stat": "1",
+                        "F_Keyin": "admin",
+                        "F_Security": "S",
+                        "F_Owner": "admin",
+                        "F_BU": "GNP",
+                        **product_data
+                    }
+                    
+                    columns = ', '.join(insert_data.keys())
+                    placeholders = ', '.join(['?' for _ in insert_data])
+                    
+                    sql = f"INSERT INTO dbo.C_Product ({columns}) OUTPUT INSERTED.F_SeqNo VALUES ({placeholders})"
+                    
+                    self.cursor.execute(sql, list(insert_data.values()))
+                    product_id = self.cursor.fetchone()[0]
+                    
+                    logger.info(f"產品記錄創建成功: {product_data.get('F_Product', '')}, ID: {product_id}")
+                
+                # 2. 處理規格類別
                 categories = {}
                 for spec in specs_data:
                     category_name = spec['category']
                     if category_name not in categories:
-                        # 檢查是否已存在
+                        # 檢查類別是否已存在
                         self.cursor.execute(
                             "SELECT F_SeqNo, F_ID FROM dbo.S_Flag WHERE F_Type = ? AND F_Name = ?",
                             ('GPU 規格參數', category_name)
                         )
-                        existing = self.cursor.fetchone()
+                        existing_category = self.cursor.fetchone()
                         
-                        if existing:
-                            categories[category_name] = existing[1]
-                            logger.info(f"找到現有規格類別: {category_name} (ID: {existing[1]})")
+                        if existing_category:
+                            categories[category_name] = existing_category[1]
+                            logger.info(f"找到現有規格類別: {category_name} (ID: {existing_category[1]})")
                         else:
                             # 創建新類別
                             self.cursor.execute(
@@ -354,40 +438,53 @@ class Database:
                                 now, now, '1', 'admin', 'S',
                                 'GPU 規格參數', next_id, category_name
                             ))
-                           
-                # 3. 創建所有規格
+                            
+                            # 獲取插入的 ID 並保存到 categories 字典
+                            inserted_id = self.cursor.fetchone()[0]
+                            categories[category_name] = inserted_id
+                            logger.info(f"創建新規格類別: {category_name} (ID: {inserted_id})")
+                
+                # 3. 處理規格 - 先刪除現有規格再新增
+                if existing:
+                    # 刪除該產品的所有現有規格
+                    self.cursor.execute(
+                        "DELETE FROM dbo.C_Specs_Database WHERE F_Master_Table = 'C_Product' AND F_Master_ID = ?",
+                        [str(product_id)]
+                    )
+                    logger.info(f"已刪除產品 ID: {product_id} 的現有規格")
+                
+                # 創建所有新規格
                 specs_count = 0
                 for spec in specs_data:
-                    self.cursor.execute(
-                        "SELECT F_ID FROM dbo.S_Flag WHERE F_Type = ? AND F_Name = ?",
-                        ('GPU 規格參數', spec['category'])
-                    )
-
-                    result = self.cursor.fetchone()
-                    category_id = result[0]
-                    print(f'category_id : {category_id}')
-                    self.cursor.execute("""
-                        INSERT INTO dbo.C_Specs_Database (
-                            F_Createdate, F_UpdateTime, F_Stat, F_Keyin, F_Security, F_Owner,
-                            F_Master_Table, F_Master_ID, F_Type, F_Name, F_Value
-                        ) OUTPUT INSERTED.F_SeqNo
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        now, now, '1', 'admin', 'S', 'admin',
-                        'C_Product', str(product_id), category_id, spec['name'], spec['value']
-                    ))
-                    
-                    self.cursor.fetchone()  # 取得 ID 但不需要使用
-                    specs_count += 1
+                    category_name = spec['category']
+                    if category_name in categories:
+                        category_id = categories[category_name]
+                        
+                        self.cursor.execute("""
+                            INSERT INTO dbo.C_Specs_Database (
+                                F_Createdate, F_UpdateTime, F_Stat, F_Keyin, F_Security, F_Owner,
+                                F_Master_Table, F_Master_ID, F_Type, F_Name, F_Value
+                            ) OUTPUT INSERTED.F_SeqNo
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            now, now, '1', 'admin', 'S', 'admin',
+                            'C_Product', str(product_id), category_id, spec['name'], spec['value']
+                        ))
+                        
+                        self.cursor.fetchone()  # 取得 ID 但不需要使用
+                        specs_count += 1
+                    else:
+                        logger.warning(f"無法為規格 {spec['name']} 找到類別 {category_name}")
                 
                 # 提交事務
                 self.conn.commit()
-                logger.info(f"成功創建產品 ID: {product_id} 及其 {specs_count} 條規格")
+                logger.info(f"成功處理產品 ID: {product_id} 及其 {specs_count} 條規格")
                 
                 return product_id, categories
+                
             except Exception as e:
                 self.conn.rollback()
-                logger.error(f"創建產品及規格失敗: {str(e)}")
+                logger.error(f"創建/更新產品及規格失敗: {str(e)}")
                 import traceback
                 logger.error(traceback.format_exc())
                 raise
