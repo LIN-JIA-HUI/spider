@@ -273,6 +273,33 @@ class GPUScraper:
                 logger.error(traceback.format_exc())
                 self.board_queue.task_done()
     
+    async def display_gpu_menu(self, gpu_list):
+        """顯示 GPU 選單並獲取用戶選擇"""
+        print(f"\n{Fore.CYAN}=== GPU 列表 ==={Style.RESET_ALL}")
+        
+        
+        while True:
+            
+            # 清空螢幕
+            os.system('cls' if os.name == 'nt' else 'clear')
+
+            # 顯示當前頁的 GPU
+            for i, gpu in enumerate(gpu_list,start=1):
+                print(f"{Fore.GREEN}{i}. {gpu['name']}{Style.RESET_ALL}")
+            
+
+            
+            choice = input(f"\n{Fore.CYAN}請輸入選項編號或導航命令: {Style.RESET_ALL}").lower()
+            
+
+            if choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(gpu_list):
+                    return gpu_list[idx-1]
+                else:
+                    print(f"{Fore.RED}無效的選擇{Style.RESET_ALL}")
+                    input("按 Enter 繼續...")
+    
     async def run(self, limit=None):
         """執行爬蟲"""
         try:
@@ -291,25 +318,25 @@ class GPUScraper:
             
             logger.info(f"獲取到 {len(gpu_list)} 個 GPU")
             
-            # 可能限制處理數量（用於測試）
-            if limit:
-                gpu_list = gpu_list[:limit]
-                logger.info(f"限制處理數量為 {limit} 個 GPU")
+            # 顯示選單並獲取用戶選擇
+            selected_gpu = await self.display_gpu_menu(gpu_list)
+            if not selected_gpu:
+                print(f"{Fore.YELLOW}已取消操作{Style.RESET_ALL}")
+                return
             
-            # 將所有產品加入佇列
-            for gpu in gpu_list:
-                await self.product_queue.put(gpu)
+            print(f"\n{Fore.GREEN}已選擇: {selected_gpu['name']}{Style.RESET_ALL}")
+            
+            # 將選中的 GPU 加入佇列
+            await self.product_queue.put(selected_gpu)
             
             # 啟動工作協程
             product_workers = []
             board_workers = []
             
-            # 產品處理工作協程
-            for i in range(3):  # 同時處理 3 個產品
-                worker = asyncio.create_task(self.product_worker())
-                print(f'worker: {worker}')  # 输出: worker: John Doe
-                product_workers.append(worker)
-                logger.info(f"啟動產品工作協程 #{i+1}")
+            # 產品處理工作協程（只需要一個，因為只處理一個 GPU）
+            worker = asyncio.create_task(self.product_worker())
+            product_workers.append(worker)
+            logger.info("啟動產品工作協程")
             
             # 主板評測處理工作協程
             for i in range(3):  # 同時處理 3 個評測
@@ -319,7 +346,7 @@ class GPUScraper:
             
             # 等待產品佇列處理完成
             await self.product_queue.join()
-            logger.info("所有產品處理完成")
+            logger.info("產品處理完成")
             
             # 等待主板評測佇列處理完成
             await self.board_queue.join()
