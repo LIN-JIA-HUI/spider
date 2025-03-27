@@ -416,11 +416,7 @@ class GPUParser:
                 'Temperatures & Fan noise',
                 'Cooler Performance Comparison',
                 'Overclocking & Power Limits',
-                'PCB Analysis',      # 新增
-                'Circuit Board',     # 新增
-                'PCB & Power',       # 新增
-                'Teardown & PCB',    # 新增
-                'Board Analysis'     # 新增
+                'Circuit Board Analysis',
             ]
             
             for option in all_options:
@@ -566,90 +562,80 @@ class GPUParser:
             
             # 根據評測類型提取結構化數據
             if "Temperature" in review_type or "Fan noise" in review_type:
-                # 提取溫度表格
-                tables = soup.find_all('table')
-                for table in tables:
-                    rows = table.find_all('tr', class_='active')
+            # 找到第一個帶有active類的行
+                active_row = soup.find('tr', class_='active')
+                if active_row:
+                    # 獲取所有單元格
+                    cells = active_row.find_all('td')
                     
-                    for row in rows:
-                        cells = row.find_all(['td', 'th'])
-                        if len(cells) >= 2:
-                            product_name = cells[0].get_text(strip=True)
-                            
-                            # 根據表格結構提取數據
-                            data_entries = []
-                            for i, cell in enumerate(cells[1:], 1):
-                                value_text = cell.get_text(strip=True)
-                                
-                                # 嘗試提取數值和單位
-                                match = re.search(r'(\d+(?:\.\d+)?)\s*([°C|dBA|RPM|W]+)', value_text)
-                                if match:
-                                    value, unit = match.groups()
-                                    data_entries.append({
-                                        'product_name': product_name,
-                                        'data_key': f'col_{i}',
-                                        'data_value': value,
-                                        'data_unit': unit
-                                    })
-                                    review_specs_data.append({
-                                        'category': 'Physical Properties',
-                                        'name': f'{review_type} {i}',
-                                        'value': f'{value} {unit}'
-                                    })
+                    # 確保有足夠的單元格
+                    if len(cells) >= 6:
+                        # 提取Gaming GPU溫度 (index 2)
+                        gpu_temp_text = cells[2].get_text(strip=True)
+                        gpu_temp_match = re.search(r'(\d+)', gpu_temp_text)
+                        if gpu_temp_match:
+                            gpu_temp = gpu_temp_match.group(1)
+                            # 添加到規格資料中
+                            review_specs_data.append({
+                                'category': 'Physical Properties',
+                                'name': 'Temp',
+                                'value': gpu_temp
+                            })
+                            logger.info(f"成功抓取GPU溫度: {gpu_temp}°C")
+                        
+                        # 提取Noise值 (index 4)
+                        noise_text = cells[4].get_text(strip=True)
+                        noise_match = re.search(r'(\d+\.\d+)', noise_text)
+                        if noise_match:
+                            noise = noise_match.group(1)
+                            # 添加到規格資料中
+                            review_specs_data.append({
+                                'category': 'Physical Properties',
+                                'name': 'Noise',
+                                'value': noise
+                            })
+                            logger.info(f"成功抓取噪音值: {noise} dBA")
 
                             
-                            review_data.extend(data_entries)
-                            
             # 超頻和功耗限制表格解析
+            # 超頻表格解析 - 簡化版本
             elif "Overclocking" in review_type or "Power Limits" in review_type:
-                # 找到所有表格
-                tables = soup.find_all('table')
-                for table in tables:
-                    # 獲取表頭
-                    headers = []
-                    thead = table.find('thead')
-                    if thead:
-                        header_cells = thead.find_all('th')
-                        headers = [cell.get_text(strip=True) for cell in header_cells]
+                try:
+                    # 找到第一個active行
+                    active_row = soup.find('tr', class_='active')
                     
-                    # 提取數據行
-                    rows = table.find('tbody').find_all('tr', class_='active') if table.find('tbody') else []
-                    
-                    for row in rows:
-                        cells = row.find_all(['td', 'th'])
-                        if len(cells) >= 2:
-                            product_name = cells[0].get_text(strip=True)
+                    if active_row:
+                        # 獲取所有td單元格
+                        cells = active_row.find_all('td')
+                        
+                        # 確定單元格數量足夠
+                        if len(cells) >= 5:
+                            # 定義我們要提取的列
+                            columns = [
+                                {"name": "Avg. GPU Clock", "index": 0},
+                                {"name": "Max. Memory Clock", "index": 1},
+                                {"name": "Performance", "index": 2},
+                                {"name": "Pwr Limit Def/Max", "index": 3},
+                                {"name": "OC Perf at Max Pwr", "index": 4}
+                            ]
                             
-                            # 提取每個單元格的數據
-                            for i, cell in enumerate(cells[1:], 1):
-                                if i < len(headers):
-                                    header_name = headers[i]
-                                else:
-                                    header_name = f'col_{i}'
-                                
-                                value_text = cell.get_text(strip=True)
-                                
-                                # 嘗試提取數值和單位
-                                # 匹配如 "3244 MHz", "103.0 FPS", "360/400 W" 等格式
-                                match = re.search(r'(\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*([A-Za-z]+)?', value_text)
-                                if match:
-                                    value = match.group(1)
-                                    unit = match.group(2) if match.group(2) else ""
-                                    
-                                    review_data.append({
-                                        'data_type': 'TDP Compare',
-                                        'data_key': header_name,
-                                        'data_value': value,
-                                        'data_unit': unit,
-                                        'product_name': product_name
-                                    })
-                                    review_specs_data.append({
-                                        'category': 'TDP Compare',
-                                        'name': header_name,
-                                        'value': value
-                                    })
-                                    logger.info(f"成功提取TDP Compare數據: {header_name} {value} {unit}")
-                                
+                            # 提取每個列的數據
+                            for column in columns:
+                                idx = column["index"]
+                                if idx < len(cells):
+                                    value = cells[idx].get_text(strip=True)
+                                    if value and value != "…":
+                                        review_specs_data.append({
+                                            'category': 'TDP Compare',
+                                            'name': column["name"],
+                                            'value': value
+                                        })
+                                        logger.info(f"成功抓取 {column['name']}: {value}")
+                
+                except Exception as e:
+                    logger.error(f"解析超頻數據時出錯: {str(e)}")
+                    import traceback
+                    logger.error(traceback.format_exc())
             
             # ========== 改進的電路板分析數據提取 ==========
             elif "Circuit" in review_type or "PCB" in review_type or "Board Analysis" in review_type:
@@ -662,7 +648,8 @@ class GPUParser:
                     r'(\d+\+\d+)[\s-]*phase\s+VRM.*powers\s+the\s+GPU',
                     r'GPU\s+is\s+powered\s+by\s+a\s+(\d+\+\d+)[\s-]*phase',
                     r'GPU.*?(\d+\+\d+)[\s-]*phase\s+VRM',
-                    r'The\s+GPU\s+uses\s+a\s+(\d+\+\d+)[\s-]*phase'
+                    r'The\s+GPU\s+uses\s+a\s+(\d+\+\d+)[\s-]*phase',
+                    r'A\s+(?:massive\s+)?(\d+)[\s-]*phase\s+VRM\s+powers\s+the\s+GPU'
                 ]
                 
                 gpu_phase_found = False
@@ -760,7 +747,9 @@ class GPUParser:
                         r'memory\s+chips\s+is\s+a\s+(\d+\+\d+)\s+phase\s+VRM',
                         r'memory\s+is\s+provided\s+by\s+a\s+(\d+\+\d+)\s+phase',
                         r'memory\s+power\s+is\s+a\s+(\d+\+\d+)\s+phase',
-                        r'memory\s+voltage\s+uses\s+a\s+(\d+\+\d+)\s+phase'
+                        r'memory\s+voltage\s+uses\s+a\s+(\d+\+\d+)\s+phase',
+                        r'memory\s+chips\s+is\s+a\s+(\d+)[\s-]*phase\s+VRM',
+                        r'Powering\s+the\s+(?:GDDR\d+\s+)?memory\s+chips\s+is\s+a\s+(\d+)[\s-]*phase\s+VRM'
                     ]
                     
                     mem_phase_found = False
@@ -790,7 +779,9 @@ class GPUParser:
                     mem_controller_patterns = [
                         r'driven\s+by\s+a\s+(?:second\s+)?Monolithic\s+Power\s+Systems\s+(MP\d+[A-Z]*)',
                         r'memory\s+controller\s+is\s+(?:a\s+)?(?:Monolithic\s+Power\s+Systems\s+)?(MP\d+[A-Z]*)',
-                        r'memory\s+voltage\s+is\s+controlled\s+by\s+(?:a\s+)?(MP\d+[A-Z]*)'
+                        r'driven\s+by\s+a\s+(?:second\s+)?(\w+\s+\w+\d+[A-Z]*)\s+controller',
+                        r'driven\s+by\s+a\s+(\w+\s+\w+\d+[A-Z]*)',
+                        r'controller\s+is\s+(?:a\s+)?(\w+\s+\w+\d+[A-Z]*)'
                     ]
                     
                     mem_controller_found = False
@@ -854,7 +845,10 @@ class GPUParser:
                     mem_mos_patterns = [
                         r'memory\s+is\s+handled\s+by\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
                         r'memory\s+VRM\s+uses\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
-                        r'memory\s+power\s+circuitry\s+uses\s+(\w+\s+\w+\s+\w+\s+DrMOS)'
+                        r'memory\s+power\s+circuitry\s+uses\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
+                        r'GPU\s+power\s+phases\s+use\s+(\w+\s+\w+\s+DrMOS)(?:\s+rated\s+for\s+(\d+)\s+A)?',
+                        r'memory\s+is\s+handled\s+by\s+(\w+\s+\w+\d+[A-Z]*\s+DrMOS)\s+chips',
+                        r'memory\s+uses\s+(\w+\s+\w+\d+[A-Z]*\s+DrMOS)'
                     ]
                     
                     mem_mos_found = False
@@ -881,6 +875,8 @@ class GPUParser:
                         logger.warning(f"未找到記憶體MOS規格資料，評測標題: {content.get('title', '')}")
                 
                 # 從文本中提取其他通用數據
+            elif "Picture" in review_type or "Teardown" in review_type:
+                logger.info(f"開始分析拆解重量熱管資料，內容長度: {len(content['body'])}")
                 # 提取重量
                 weight_patterns = [
                     r'weighs\s+(\d+(?:\.\d+)?)\s*g',
