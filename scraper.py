@@ -37,7 +37,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file),
+        logging.FileHandler(log_file, encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -77,12 +77,12 @@ class GPUScraper:
             logger.info(f"跳過已處理的 URL: {url}")
             return None
         
-        for attempt in range(5):  # 嘗試 5 次
+        for attempt in range(15):  # 嘗試 5 次
             try:
                 headers = self.anti_crawl.get_headers()
                 logger.info(f"請求 URL: {url}")
                 
-                async with self.session.get(url, headers=headers, timeout=30) as response:
+                async with self.session.get(url, headers=headers, timeout=400) as response:
                     response.raise_for_status()
                     html = await response.text()
                 
@@ -97,6 +97,7 @@ class GPUScraper:
                 await asyncio.sleep(1)  # 額外延遲
         
         return None
+    
     
     async def scrape_product_list(self):
         """爬取產品列表"""
@@ -283,15 +284,21 @@ class GPUScraper:
             
             # 清空螢幕
             os.system('cls' if os.name == 'nt' else 'clear')
+            sort_gpu_list = sorted(gpu_list, key=lambda x: x['name'])
+            gpu_list = sort_gpu_list
 
             # 顯示當前頁的 GPU
             for i, gpu in enumerate(gpu_list,start=1):
                 print(f"{Fore.GREEN}{i}. {gpu['name']}{Style.RESET_ALL}")
             
 
+            # 提示用戶輸入
+            choice = input(f"\n{Fore.CYAN}請輸入選項編號或導航命令（留空以選擇所有 GPU）: {Style.RESET_ALL}").lower()
             
-            choice = input(f"\n{Fore.CYAN}請輸入選項編號或導航命令: {Style.RESET_ALL}").lower()
-            
+            # 如果輸入為空，返回所有 GPU
+            if choice.strip() == "":
+                return gpu_list
+
 
             if choice.isdigit():
                 idx = int(choice)
@@ -318,26 +325,43 @@ class GPUScraper:
                 return
             
             logger.info(f"獲取到 {len(gpu_list)} 個 GPU")
+
+            # # 可能限制處理數量（用於測試）
+            # if limit:
+            #     gpu_list = gpu_list[:limit]
+            #     logger.info(f"限制處理數量為 {limit} 個 GPU")
             
-            # 顯示選單並獲取用戶選擇
-            selected_gpu = await self.display_gpu_menu(gpu_list)
-            if not selected_gpu:
-                print(f"{Fore.YELLOW}已取消操作{Style.RESET_ALL}")
-                return
+            # # 顯示選單並獲取用戶選擇
+            # selected_gpu = await self.display_gpu_menu(gpu_list)
+            # if not selected_gpu:
+            #     print(f"{Fore.YELLOW}已取消操作{Style.RESET_ALL}")
+            #     return
             
-            print(f"\n{Fore.GREEN}已選擇: {selected_gpu['name']}{Style.RESET_ALL}")
+            # print(f"\n{Fore.GREEN}已選擇: {selected_gpu['name']}{Style.RESET_ALL}")
             
-            # 將選中的 GPU 加入佇列
-            await self.product_queue.put(selected_gpu)
+            # # 將選中的 GPU 加入佇列
+            # if isinstance(selected_gpu, list):  # 如果是列表(多個GPU)
+            #     for gpu in selected_gpu:
+            #         await self.product_queue.put(gpu)
+            # else:  # 如果是字典(單個GPU)
+            #     await self.product_queue.put(selected_gpu)
+            # 將所有 GPU 加入佇列
+            for gpu in gpu_list:
+                await self.product_queue.put(gpu)
             
             # 啟動工作協程
             product_workers = []
             board_workers = []
             
-            # 產品處理工作協程（只需要一個，因為只處理一個 GPU）
+            # # 產品處理工作協程（只需要一個，因為只處理一個 GPU）
+            # worker = asyncio.create_task(self.product_worker())
+            # product_workers.append(worker)
+            # logger.info("啟動產品工作協程")
+
+            # 產品處理工作協程
             worker = asyncio.create_task(self.product_worker())
             product_workers.append(worker)
-            logger.info("啟動產品工作協程")
+            logger.info(f"啟動單一產品工作協程")
             
             # 主板評測處理工作協程
             for i in range(3):  # 同時處理 3 個評測
@@ -399,15 +423,15 @@ def convert_to_specs_data(board):
 # 入口點
 if __name__ == "__main__":
     try:
-        # 解析命令列參數
-        import argparse
-        parser = argparse.ArgumentParser(description='TechPowerUp GPU 爬蟲')
-        parser.add_argument('--limit', type=int, help='限制爬取的 GPU 數量（用於測試）')
-        args = parser.parse_args()
+        # # 解析命令列參數
+        # import argparse
+        # parser = argparse.ArgumentParser(description='TechPowerUp GPU 爬蟲')
+        # parser.add_argument('--limit', type=int, help='限制爬取的 GPU 數量（用於測試）')
+        # args = parser.parse_args()
         
         # 執行爬蟲
         scraper = GPUScraper()
-        asyncio.run(scraper.run(1))
+        asyncio.run(scraper.run())
     except KeyboardInterrupt:
         print(f"{Fore.YELLOW}使用者中斷爬蟲程序{Style.RESET_ALL}")
         logger.info("使用者中斷爬蟲程序")

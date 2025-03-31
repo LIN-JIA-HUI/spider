@@ -23,17 +23,17 @@ class Database:
             logger.info("正在連接資料庫...")
             
             # 從環境變數或預設值獲取連接信息
-            server = os.getenv('DB_SERVER', 'localhost')
-            database = os.getenv('DB_NAME', 'PM')
-            username = os.getenv('DB_USER', 'your_username') 
-            password = os.getenv('DB_PASSWORD', 'your_password') 
-            trusted_connection = os.getenv('DB_TRUSTED_CONNECTION', 'yes')
+            server = os.getenv('DB_SERVER')
+            database = os.getenv('DB_NAME')
+            username = os.getenv('DB_USER')
+            password = os.getenv('DB_PASSWORD') 
+            trusted_connection = os.getenv('DB_TRUSTED_CONNECTION')
             
             # 使用 Windows 身份驗證連接
-            connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
+            # connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
 
             # 使用 sql server 連接
-            # connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
+            connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
 
             conn = pyodbc.connect(connection_string)
             

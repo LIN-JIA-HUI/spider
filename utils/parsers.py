@@ -392,7 +392,6 @@ class GPUParser:
         except Exception as e:
             logger.error(f"解析主板區域時出錯: {str(e)}")
         
-
         return board_data
     
     @staticmethod
@@ -413,6 +412,7 @@ class GPUParser:
             # 尋找指定選項 - 擴展關鍵詞列表
             target_keywords = [
                 'Pictures & Teardown',
+                'Pictures & Cooler',
                 'Temperatures & Fan noise',
                 'Cooler Performance Comparison',
                 'Overclocking & Power Limits',
@@ -562,40 +562,62 @@ class GPUParser:
             
             # 根據評測類型提取結構化數據
             if "Temperature" in review_type or "Fan noise" in review_type:
-            # 找到第一個帶有active類的行
-                active_row = soup.find('tr', class_='active')
-                if active_row:
-                    # 獲取所有單元格
-                    cells = active_row.find_all('td')
+                # 找到表格
+                table = soup.find('table', class_='tputbl')
+                
+                if table:
+                    # 找到第一個active行
+                    active_row = table.find('tr', class_='active')
                     
-                    # 確保有足夠的單元格
-                    if len(cells) >= 6:
-                        # 提取Gaming GPU溫度 (index 2)
-                        gpu_temp_text = cells[2].get_text(strip=True)
-                        gpu_temp_match = re.search(r'(\d+)', gpu_temp_text)
-                        if gpu_temp_match:
-                            gpu_temp = gpu_temp_match.group(1)
-                            # 添加到規格資料中
-                            review_specs_data.append({
-                                'category': 'Physical Properties',
-                                'name': 'Temp',
-                                'value': gpu_temp
-                            })
-                            logger.info(f"成功抓取GPU溫度: {gpu_temp}°C")
+                    if active_row:
+                        # 獲取所有單元格
+                        cells = active_row.find_all('td')
                         
-                        # 提取Noise值 (index 4)
-                        noise_text = cells[4].get_text(strip=True)
-                        noise_match = re.search(r'(\d+\.\d+)', noise_text)
-                        if noise_match:
-                            noise = noise_match.group(1)
-                            # 添加到規格資料中
-                            review_specs_data.append({
-                                'category': 'Physical Properties',
-                                'name': 'Noise',
-                                'value': noise
-                            })
-                            logger.info(f"成功抓取噪音值: {noise} dBA")
-
+                        # 打印調試信息
+                        logger.info(f"找到 {len(cells)} 個單元格")
+                        for i, cell in enumerate(cells):
+                            logger.info(f"單元格 {i}: '{cell.get_text(strip=True)}'")
+                        
+                        # 智能識別溫度和噪音值
+                        temp_found = False
+                        noise_found = False
+                        
+                        for i, cell in enumerate(cells):
+                            cell_text = cell.get_text(strip=True)
+                            
+                            # 尋找Gaming區域的GPU溫度
+                            if "°C" in cell_text and not temp_found:
+                                # 至少是第3個單元格(索引2)，確保是Gaming區域
+                                if i >= 2:
+                                    gpu_temp_match = re.search(r'(\d+)', cell_text)
+                                    if gpu_temp_match:
+                                        gpu_temp = gpu_temp_match.group(1)
+                                        review_specs_data.append({
+                                            'category': 'Physical Properties',
+                                            'name': 'Temp',
+                                            'value': gpu_temp
+                                        })
+                                        logger.info(f"成功抓取GPU溫度: {gpu_temp}°C")
+                                        temp_found = True
+                                    else:
+                                        logger.warning(f"未找到GPU溫度")
+                            
+                            # 尋找Gaming區域的噪音值
+                            if "dBA" in cell_text and not noise_found:
+                                # 至少是第3個單元格，且在找到溫度之後
+                                if i >= 3:
+                                    noise_match = re.search(r'(\d+\.\d+)', cell_text)
+                                    if noise_match:
+                                        noise = noise_match.group(1)
+                                        review_specs_data.append({
+                                            'category': 'Physical Properties',
+                                            'name': 'Noise',
+                                            'value': noise
+                                        })
+                                        logger.info(f"成功抓取噪音值: {noise} dBA")
+                                        noise_found = True
+                                    else:
+                                        logger.warning(f"未找到噪音值")
                             
             # 超頻和功耗限制表格解析
             # 超頻表格解析 - 簡化版本
@@ -612,11 +634,11 @@ class GPUParser:
                         if len(cells) >= 5:
                             # 定義我們要提取的列
                             columns = [
-                                {"name": "Avg. GPU Clock", "index": 0},
-                                {"name": "Max. Memory Clock", "index": 1},
+                                {"name": "AvgGPUClock", "index": 0},
+                                {"name": "MaxMemoryClock", "index": 1},
                                 {"name": "Performance", "index": 2},
-                                {"name": "Pwr Limit Def/Max", "index": 3},
-                                {"name": "OC Perf at Max Pwr", "index": 4}
+                                {"name": "PwrLimitDefMax", "index": 3},
+                                {"name": "OCPerfMaxPwr", "index": 4}
                             ]
                             
                             # 提取每個列的數據
@@ -644,12 +666,21 @@ class GPUParser:
                 
                 # 使用多種模式匹配 GPU VRM 相數
                 gpu_phase_patterns = [
+                    # 添加通用模式在最上方
+                    r'(?:A|An)\s+(\d+\+\d+|\d+)[\s-]*phase\s+VRM\s+powers\s+the\s+GPU',
+                    r'GPU\s+(?:is\s+powered|voltage\s+is(?:\s+powered)?)\s+by\s+(?:a|an)?\s+(\d+\+\d+|\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s-]*phase',
+                    # 下面是原有的模式
                     r'A\s+(\d+\+\d+)\s+phase\s+VRM\s+powers\s+the\s+GPU',
                     r'(\d+\+\d+)[\s-]*phase\s+VRM.*powers\s+the\s+GPU',
                     r'GPU\s+is\s+powered\s+by\s+a\s+(\d+\+\d+)[\s-]*phase',
+                    r'GPU\s+voltage\s+is\s+(\d+)[\s-]*phase',
                     r'GPU.*?(\d+\+\d+)[\s-]*phase\s+VRM',
                     r'The\s+GPU\s+uses\s+a\s+(\d+\+\d+)[\s-]*phase',
-                    r'A\s+(?:massive\s+)?(\d+)[\s-]*phase\s+VRM\s+powers\s+the\s+GPU'
+                    r'A\s+(?:massive\s+)?(\d+)[\s-]*phase\s+VRM\s+powers\s+the\s+GPU',
+                    r'An\s+(\d+)[\s-]*phase\s+VRM\s+powers\s+the\s+GPU',
+                    r'GPU\s+voltage\s+is\s+powered\s+by.*?running\s+with\s+(\d+)\s+power\s+phases',
+                    r'GPU\s+voltage\s+is\s+a\s+(\w+)[\s-]*phase\s+design',
+                    r'running\s+with\s+(\d+)\s+power\s+phases'
                 ]
                 
                 gpu_phase_found = False
@@ -677,10 +708,25 @@ class GPUParser:
                 
                 # 使用多種模式匹配 GPU 控制器型號
                 gpu_controller_patterns = [
+                    # 添加通用模式在最上方
+                    r'(?:managed|controlled)\s+by\s+(?:a|an)\s+(?:\w+\s+)?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'controller\s+(?:is|chip\s+is)\s+(?:a|an)?\s+(?:\w+\s+)?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'(\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)\s+controller',
+                    r'voltage\s+controller.*?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'voltage\s+is\s+powered\s+by\s+(?:an\s+)?(?:expensive\s+)?(\w+\s+\w+\d+[A-Z0-9-]+)',
+                    # 下面是原有的模式
                     r'managed\s+by\s+a\s+Monolithic\s+Power\s+Systems\s+(MP\d+[A-Z]*)',
                     r'controller\s+is\s+(?:a\s+)?(?:Monolithic\s+Power\s+Systems\s+)?(MP\d+[A-Z]*)',
                     r'(MP\d+[A-Z]*)\s+controller',
-                    r'controller\s+chip\s+is\s+(?:a\s+)?(?:Monolithic\s+Power\s+Systems\s+)?(MP\d+[A-Z]*)'
+                    r'controller\s+chip\s+is\s+(?:a\s+)?(?:Monolithic\s+Power\s+Systems\s+)?(MP\d+[A-Z]*)',
+                    r'GPU\s+voltage\s+is\s+powered\s+by\s+(?:an\s+)?(?:expensive\s+)?(\w+\s+\w+\d+[A-Z0-9]*)',
+                    r'voltage\s+is\s+powered\s+by\s+(?:an\s+)?(?:expensive\s+)?(\w+\s+\w+\d+[A-Z0-9]*)',
+                    r'controlled\s+by\s+(?:an\s+)?(\w+\s+&\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'managed\s+by\s+an\s+(\w+\s+\w+\d+[A-Z0-9-]+)',
+                    r'controlled\s+by\s+an\s+(\w+\s+\w+\d+[A-Z0-9-]+\s+\(\w+\))',
+                    r'controlled\s+by\s+a\s+uPI\s+(uP\d+[A-Z0-9]+)\s+voltage\s+controller',
+                    r'design\s+managed\s+by\s+an\s+(\w+\s+&\s+\w+\s+\w+\d+[A-Z0-9-]+)',
+                    r'voltage\s+controller.*?(\w+\s+&\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)'
                 ]
                 
                 controller_found = False
@@ -708,9 +754,25 @@ class GPUParser:
                 
                 # 使用多種模式匹配 GPU MOS 規格
                 gpu_mos_patterns = [
+                    # 添加通用模式在最上方
+                    r'(?:All\s+)?GPU\s+power\s+phases\s+use\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?(?:\s+\([A-Z0-9]+\))?)\s+DrMOS(?:\s+components)?.*?(?:with\s+a\s+rating\s+of|rated\s+for)\s+(\d+)\s+A',
+                    r'DrMOS\s+for\s+the\s+GPU\s+are\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+).*?rated\s+for\s+(\d+)\s+A',
+                    r'DrMOS\s+devices\s+are\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+)',
+                    r'GPU.*?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?(?:\s+\([A-Z0-9]+\))?)\s+DrMOS.*?(\d+)\s+A',
+                    # 下方是原有的模式
                     r'GPU\s+power\s+phases\s+use\s+(\w+\s+\w+\s+\w+\s+DrMOS)(?:\s+with\s+a\s+rating\s+of\s+(\d+)\s+A)?',
                     r'(\w+\s+\w+\s+\w+\s+DrMOS)(?:\s+rated\s+for\s+(\d+)\s+A)?',
-                    r'DrMOS\s+devices\s+are\s+(\w+\s+\w+\s+\w+)'
+                    r'DrMOS\s+devices\s+are\s+(\w+\s+\w+\s+\w+)',
+                    r'(\w+\s+\w+\d+[A-Z0-9]*\s+DrMOS)\s+chips\s+are\s+used',
+                    r'DrMOS\s+chips\s+are\s+(\w+\s+\w+\d+[A-Z0-9]*)',
+                    r'DrMOS\s+chips\s+with\s+a\s+(\d+)\s+A\s+rating'
+                    r'DrMOS\s+for\s+the\s+GPU\s+are\s+(\w+\s+\d+[A-Z0-9-]+)',
+                    r'GPU\s+power\s+phases\s+use\s+(\w+\s+&\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?)',
+                    r'GPU.*?DrMOS\s+chips\s+with\s+a\s+(\d+)\s+A\s+rating',
+                    r'(\w+\s+(?:&|and)\s+\w+\s+\w+\d+[A-Z0-9-]+)\s+DrMOS.*?GPU.*?rated\s+for\s+(\d+)\s+A',
+                    r'All\s+GPU.*?DrMOS.*?rated\s+for\s+(\d+)\s+A',
+                    r'All\s+GPU\s+power\s+phases\s+use\s+(\w+\s+\w+\d+[A-Z]+)\s+DrMOS,\s+rated\s+for\s+(\d+)\s+A',
+                    r'All\s+GPU\s+power\s+phases\s+use\s+(\w+\s+&\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)'
                 ]
                 
                 mos_found = False
@@ -742,140 +804,173 @@ class GPUParser:
                     if not mos_found:
                         logger.warning(f"未找到 GPU MOS規格資料，評測標題: {content.get('title', '')}")
                     
-                    # 使用多種模式匹配 Memory VRM 相數
-                    mem_phase_patterns = [
-                        r'memory\s+chips\s+is\s+a\s+(\d+\+\d+)\s+phase\s+VRM',
-                        r'memory\s+is\s+provided\s+by\s+a\s+(\d+\+\d+)\s+phase',
-                        r'memory\s+power\s+is\s+a\s+(\d+\+\d+)\s+phase',
-                        r'memory\s+voltage\s+uses\s+a\s+(\d+\+\d+)\s+phase',
-                        r'memory\s+chips\s+is\s+a\s+(\d+)[\s-]*phase\s+VRM',
-                        r'Powering\s+the\s+(?:GDDR\d+\s+)?memory\s+chips\s+is\s+a\s+(\d+)[\s-]*phase\s+VRM'
-                    ]
+                # 使用多種模式匹配 Memory VRM 相數
+                mem_phase_patterns = [
+                    # 添加通用模式在最上方
+                    r'(?:memory|Memory)\s+(?:chips\s+is|is\s+provided\s+by|power\s+is|voltage\s+uses)\s+(?:a|an)?\s+(\d+\+\d+|\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s-]*phase',
+                     r'Powering\s+the\s+(?:six\s+)?(?:GDDR\d+\s+)?memory\s+chips\s+is\s+(?:a|an)?\s+(\d+\+\d+|\d+)[\s-]*phase\s+VRM',
+                    # 下面是原有的模式
+                    r'memory\s+chips\s+is\s+a\s+(\d+\+\d+)\s+phase\s+VRM',
+                    r'memory\s+is\s+provided\s+by\s+a\s+(\d+\+\d+)\s+phase',
+                    r'memory\s+power\s+is\s+a\s+(\d+\+\d+)\s+phase',
+                    r'Memory\s+voltage\s+is\s+a\s+(\w+)[\s-]*phase',
+                    r'memory\s+voltage\s+uses\s+a\s+(\d+\+\d+)\s+phase',
+                    r'memory\s+chips\s+is\s+a\s+(\d+)[\s-]*phase\s+VRM',
+                    r'Powering\s+the\s+(?:GDDR\d+\s+)?memory\s+chips\s+is\s+a\s+(\d+)[\s-]*phase\s+VRM',
+                    r'Powering\s+the\s+(?:six\s+)?(?:GDDR\d+\s+)?memory\s+chips\s+is\s+a\s+(\d+)[\s-]*phase\s+VRM',
+                    r'voltage\s+uses\s+a\s+(\d+)[\s-]*phase'
+                ]
                     
-                    mem_phase_found = False
-                    for pattern in mem_phase_patterns:
-                        mem_phase_match = re.search(pattern, content['body'], re.IGNORECASE)
-                        if mem_phase_match:
-                            mem_phase_found = True
-                            review_data.append({
-                                'data_type': 'Memory',
-                                'data_key': 'MEM項數',
-                                'data_value': mem_phase_match.group(1),
-                                'data_unit': 'phase',
-                                'product_name': content.get('title', '')
-                            })
-                            review_specs_data.append({
-                                'category': 'Memory',
-                                'name': 'MemoryMEMCount',
-                                'value': mem_phase_match.group(1)
-                            })
-                            logger.info(f"成功匹配記憶體相數: {mem_phase_match.group(1)}")
-                            break
-                    
-                    if not mem_phase_found:
-                        logger.warning(f"未找到記憶體相數資料，評測標題: {content.get('title', '')}")
-                    
-                    # 使用多種模式匹配 Memory 控制器型號
-                    mem_controller_patterns = [
-                        r'driven\s+by\s+a\s+(?:second\s+)?Monolithic\s+Power\s+Systems\s+(MP\d+[A-Z]*)',
-                        r'memory\s+controller\s+is\s+(?:a\s+)?(?:Monolithic\s+Power\s+Systems\s+)?(MP\d+[A-Z]*)',
-                        r'driven\s+by\s+a\s+(?:second\s+)?(\w+\s+\w+\d+[A-Z]*)\s+controller',
-                        r'driven\s+by\s+a\s+(\w+\s+\w+\d+[A-Z]*)',
-                        r'controller\s+is\s+(?:a\s+)?(\w+\s+\w+\d+[A-Z]*)'
-                    ]
-                    
-                    mem_controller_found = False
-                    for pattern in mem_controller_patterns:
-                        mem_controller_match = re.search(pattern, content['body'], re.IGNORECASE)
-                        if mem_controller_match:
-                            mem_controller_found = True
-                            review_data.append({
-                                'data_type': 'Memory',
-                                'data_key': '控制器型號',
-                                'data_value': mem_controller_match.group(1),
-                                'data_unit': '',
-                                'product_name': content.get('title', '')
-                            })
-                            review_specs_data.append({
-                                'category': 'Memory',
-                                'name': 'MemoryControllerModel',
-                                'value': mem_controller_match.group(1)
-                            })
-                            logger.info(f"成功匹配記憶體控制器: {mem_controller_match.group(1)}")
-                            break
-                    
-                    if not mem_controller_found:
-                        logger.warning(f"未找到記憶體控制器型號資料，評測標題: {content.get('title', '')}")
-                    
-                    # 使用多種模式匹配 Memory 芯片型號和速率
-                    # mem_chip_patterns = [
-                    #     r'memory\s+chips\s+are\s+made\s+by\s+(\w+),\s+and\s+bear\s+the\s+model\s+number\s+([\w\-]+),\s+they\s+are\s+rated\s+for\s+(\d+)\s+Gbps',
-                    #     r'(\w+)\s+([\w\-]+)\s+memory\s+chips.*?rated\s+(?:at|for)\s+(\d+)\s+Gbps',
-                    #     r'memory\s+chips\s+(?:are|from)\s+(\w+)\s+([\w\-]+).*?(\d+)\s+Gbps'
-                    # ]
-                    
-                    # mem_chip_found = False
-                    # for pattern in mem_chip_patterns:
-                    #     mem_chip_match = re.search(pattern, content['body'], re.IGNORECASE)
-                    #     if mem_chip_match:
-                    #         mem_chip_found = True
-                    #         manufacturer = mem_chip_match.group(1)
-                    #         model = mem_chip_match.group(2)
-                    #         speed = mem_chip_match.group(3)
-                            
-                    #         review_data.append({
-                    #             'data_type': 'Memory',
-                    #             'data_key': '記憶體型號',
-                    #             'data_value': f"{manufacturer} {model} {speed}",
-                    #             'data_unit': 'Gbps',
-                    #             'product_name': content.get('title', '')
-                    #         })
-                    #         review_specs_data.append({
-                    #             'category': 'Memory',
-                    #             'name': 'MemoryControllerModel',
-                    #             'value': f"{manufacturer} {model} {speed}"
-                    #         })
-                    #         logger.info(f"成功匹配記憶體晶片型號: {manufacturer} {model} {speed}Gbps")
-                    #         break
-                    
-                    # if not mem_chip_found:
-                    #     logger.warning(f"未找到記憶體晶片型號資料，評測標題: {content.get('title', '')}")
-                    
-                    # 使用多種模式匹配 Memory MOS規格
-                    mem_mos_patterns = [
-                        r'memory\s+is\s+handled\s+by\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
-                        r'memory\s+VRM\s+uses\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
-                        r'memory\s+power\s+circuitry\s+uses\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
-                        r'GPU\s+power\s+phases\s+use\s+(\w+\s+\w+\s+DrMOS)(?:\s+rated\s+for\s+(\d+)\s+A)?',
-                        r'memory\s+is\s+handled\s+by\s+(\w+\s+\w+\d+[A-Z]*\s+DrMOS)\s+chips',
-                        r'memory\s+uses\s+(\w+\s+\w+\d+[A-Z]*\s+DrMOS)'
-                    ]
-                    
-                    mem_mos_found = False
-                    for pattern in mem_mos_patterns:
-                        mem_mos_match = re.search(pattern, content['body'], re.IGNORECASE)
-                        if mem_mos_match:
-                            mem_mos_found = True
-                            review_data.append({
-                                'data_type': 'Memory',
-                                'data_key': 'MOS規格',
-                                'data_value': mem_mos_match.group(1),
-                                'data_unit': '',
-                                'product_name': content.get('title', '')
-                            })
-                            review_specs_data.append({
-                                'category': 'Memory',
-                                'name': 'MemoryMOSSpec',
-                                'value': mem_mos_match.group(1)
-                            })
-                            logger.info(f"成功匹配記憶體MOS規格: {mem_mos_match.group(1)}")
-                            break
-                    
-                    if not mem_mos_found:
-                        logger.warning(f"未找到記憶體MOS規格資料，評測標題: {content.get('title', '')}")
+                mem_phase_found = False
+                for pattern in mem_phase_patterns:
+                    mem_phase_match = re.search(pattern, content['body'], re.IGNORECASE)
+                    if mem_phase_match:
+                        mem_phase_found = True
+                        review_data.append({
+                            'data_type': 'Memory',
+                            'data_key': 'MEM項數',
+                            'data_value': mem_phase_match.group(1),
+                            'data_unit': 'phase',
+                            'product_name': content.get('title', '')
+                        })
+                        review_specs_data.append({
+                            'category': 'Memory',
+                            'name': 'MemoryMEMCount',
+                            'value': mem_phase_match.group(1)
+                        })
+                        logger.info(f"成功匹配記憶體相數: {mem_phase_match.group(1)}")
+                        break
                 
+                if not mem_phase_found:
+                    logger.warning(f"未找到記憶體相數資料，評測標題: {content.get('title', '')}")
+                    
+                # 使用多種模式匹配 Memory 控制器型號
+                mem_controller_patterns = [
+                    # 添加通用模式在最上方
+                    r'(?:driven|controlled)\s+by\s+(?:a|an|another|the\s+same)\s+(?:second\s+)?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'(?:memory|Memory)\s+(?:controller|voltage)\s+is\s+(?:controlled\s+by|(?:a|an)?\s+\w+[\s-]*phase\s+design\s+generated\s+by)\s+(?:a|an)?\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+)',
+                    r'Both\s+are\s+managed\s+by\s+another\s+(\w+(?:\s+&|\s+and)?\s+\w+)',
+                    # 下面是原有的模式
+                    r'driven\s+by\s+a\s+(?:second\s+)?Monolithic\s+Power\s+Systems\s+(MP\d+[A-Z]*)',
+                    r'memory\s+controller\s+is\s+(?:a\s+)?(?:Monolithic\s+Power\s+Systems\s+)?(MP\d+[A-Z]*)',
+                    r'driven\s+by\s+a\s+(?:second\s+)?(\w+\s+\w+\d+[A-Z]*)\s+controller',
+                    r'driven\s+by\s+a\s+(\w+\s+\w+\d+[A-Z]*)',
+                    r'driven\s+by\s+another\s+(\w+\s+&\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'driven\s+by\s+another\s+(\w+\s+&\s+\w+\s+\w+\d+[A-Z0-9-]+)',
+                    r'controller\s+is\s+(?:a\s+)?(\w+\s+\w+\d+[A-Z]*)',
+                    r'Memory\s+voltage\s+uses.*?controlled\s+by\s+(?:an\s+)?(\w+\s+\w+\d+[A-Z0-9]*)',
+                    r'Memory\s+voltage\s+is\s+a.*?design\s+generated\s+by\s+a\s+(\w+\s+\w+\d+[A-Z0-9-]+)',
+                    r'Both\s+are\s+managed\s+by\s+another\s+(\w+\s+&\s+\w+)\s+controller',
+                    r'driven\s+by\s+the\s+same\s+(\w+\s+\w+\d+[A-Z0-9-]+)',
+                    r'design\s+controlled\s+by\s+(?:an\s+)?(\w+\s+\w+\d+[A-Z0-9]*)'
+                ]
+                
+                mem_controller_found = False
+                for pattern in mem_controller_patterns:
+                    mem_controller_match = re.search(pattern, content['body'], re.IGNORECASE)
+                    if mem_controller_match:
+                        mem_controller_found = True
+                        review_data.append({
+                            'data_type': 'Memory',
+                            'data_key': '控制器型號',
+                            'data_value': mem_controller_match.group(1),
+                            'data_unit': '',
+                            'product_name': content.get('title', '')
+                        })
+                        review_specs_data.append({
+                            'category': 'Memory',
+                            'name': 'MemoryControllerModel',
+                            'value': mem_controller_match.group(1)
+                        })
+                        logger.info(f"成功匹配記憶體控制器: {mem_controller_match.group(1)}")
+                        break
+                
+                if not mem_controller_found:
+                    logger.warning(f"未找到記憶體控制器型號資料，評測標題: {content.get('title', '')}")
+                    
+                # 使用多種模式匹配 Memory 芯片型號和速率
+                # mem_chip_patterns = [
+                #     r'memory\s+chips\s+are\s+made\s+by\s+(\w+),\s+and\s+bear\s+the\s+model\s+number\s+([\w\-]+),\s+they\s+are\s+rated\s+for\s+(\d+)\s+Gbps',
+                #     r'(\w+)\s+([\w\-]+)\s+memory\s+chips.*?rated\s+(?:at|for)\s+(\d+)\s+Gbps',
+                #     r'memory\s+chips\s+(?:are|from)\s+(\w+)\s+([\w\-]+).*?(\d+)\s+Gbps'
+                # ]
+                
+                # mem_chip_found = False
+                # for pattern in mem_chip_patterns:
+                #     mem_chip_match = re.search(pattern, content['body'], re.IGNORECASE)
+                #     if mem_chip_match:
+                #         mem_chip_found = True
+                #         manufacturer = mem_chip_match.group(1)
+                #         model = mem_chip_match.group(2)
+                #         speed = mem_chip_match.group(3)
+                        
+                #         review_data.append({
+                #             'data_type': 'Memory',
+                #             'data_key': '記憶體型號',
+                #             'data_value': f"{manufacturer} {model} {speed}",
+                #             'data_unit': 'Gbps',
+                #             'product_name': content.get('title', '')
+                #         })
+                #         review_specs_data.append({
+                #             'category': 'Memory',
+                #             'name': 'MemoryControllerModel',
+                #             'value': f"{manufacturer} {model} {speed}"
+                #         })
+                #         logger.info(f"成功匹配記憶體晶片型號: {manufacturer} {model} {speed}Gbps")
+                #         break
+                
+                # if not mem_chip_found:
+                #     logger.warning(f"未找到記憶體晶片型號資料，評測標題: {content.get('title', '')}")
+                
+                # 使用多種模式匹配 Memory MOS規格
+                mem_mos_patterns = [
+                    # 添加通用模式在最上方
+                    r'(?:memory|Memory)\s+is\s+handled\s+by\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?(?:\s+\([A-Z0-9]+\))?)\s+DrMOS(?:\s+chips)?.*?(?:with\s+a|rated\s+for)\s+(\d+)\s+A',
+                    r'(?:memory|Memory)\s+VRM\s+uses\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+)\s+DrMOS',
+                    r'(?:memory|Memory)\s+power\s+circuitry\s+uses\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+)\s+DrMOS',
+                    r'For\s+(?:memory|Memory),\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+).*?(?:with\s+a|rated\s+for)\s+(\d+)\s+A',
+                    r'Just\s+like\s+GPU,\s+the\s+(?:memory|Memory).*?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?(?:\s+\([A-Z0-9]+\))?)\s+DrMOS.*?(\d+)\s+A',
+                    # 下面是原有的模式
+                    r'memory\s+is\s+handled\s+by\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
+                    r'memory\s+VRM\s+uses\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
+                    r'memory\s+power\s+circuitry\s+uses\s+(\w+\s+\w+\s+\w+\s+DrMOS)',
+                    r'GPU\s+power\s+phases\s+use\s+(\w+\s+\w+\s+DrMOS)(?:\s+rated\s+for\s+(\d+)\s+A)?',
+                    r'memory\s+is\s+handled\s+by\s+(\w+\s+\w+\d+[A-Z]*\s+DrMOS)\s+chips',
+                    r'memory\s+is\s+handled\s+by\s+(\w+\s+&\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'For\s+memory,\s+(\w+\s+\d+[A-Z0-9-]+)',
+                    r'For\s+memory,\s+(\w+\s+\w+\d+[A-Z0-9-]+)\s+DrMOS\s+with\s+a\s+(\d+)\s+A\s+rating\s+are\s+used',
+                    r'memory\s+is\s+handled\s+by\s+(\w+\s+\w+\d+[A-Z0-9-]+)',
+                    r'memory.*?DrMOS\s+chips\s+with\s+a\s+(\d+)\s+A\s+rating',
+                    r'For\s+memory,\s+(\w+\s+(?:&|and)\s+\w+\s+\w+\d+[A-Z0-9-]+).*?with\s+a\s+(\d+)\s+A\s+rating',
+                    r'Just\s+like\s+GPU,\s+the\s+memory.*?DrMOS.*?(\d+)\s+A'
+                    r'memory\s+uses\s+(\w+\s+\w+\d+[A-Z]*\s+DrMOS)'
+                ]
+                
+                mem_mos_found = False
+                for pattern in mem_mos_patterns:
+                    mem_mos_match = re.search(pattern, content['body'], re.IGNORECASE)
+                    if mem_mos_match:
+                        mem_mos_found = True
+                        review_data.append({
+                            'data_type': 'Memory',
+                            'data_key': 'MOS規格',
+                            'data_value': mem_mos_match.group(1),
+                            'data_unit': '',
+                            'product_name': content.get('title', '')
+                        })
+                        review_specs_data.append({
+                            'category': 'Memory',
+                            'name': 'MemoryMOSSpec',
+                            'value': mem_mos_match.group(1)
+                        })
+                        logger.info(f"成功匹配記憶體MOS規格: {mem_mos_match.group(1)}")
+                        break
+                
+                if not mem_mos_found:
+                    logger.warning(f"未找到記憶體MOS規格資料，評測標題: {content.get('title', '')}")
+            
                 # 從文本中提取其他通用數據
-            elif "Picture" in review_type or "Teardown" in review_type:
+            elif "Picture" in review_type or "Teardown" in review_type or "Cooler" in review_type:
                 logger.info(f"開始分析拆解重量熱管資料，內容長度: {len(content['body'])}")
                 # 提取重量
                 weight_patterns = [
@@ -899,7 +994,7 @@ class GPUParser:
                         })
                         review_specs_data.append({
                             'category': 'Physical Properties',
-                            'name': 'weight',
+                            'name': 'Weight',
                             'value': weight_match.group(1)
                         })
                         logger.info(f"成功匹配產品重量: {weight_match.group(1)}g")
