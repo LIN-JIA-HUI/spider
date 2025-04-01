@@ -9,6 +9,18 @@ from urllib.parse import urljoin
 from colorama import init, Fore, Style
 from dotenv import load_dotenv
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
+from fastapi import FastAPI, BackgroundTasks
+import uvicorn
+
+# 導入自定義模組
+from utils.anti_crawl import AntiCrawl
+from utils.parsers import GPUParser
+from utils.database import Database
+from utils.state_manager import ScrapeState, StorageManager
+
+# 初始化 FastAPI 應用
+app = FastAPI(title="GPU 爬蟲 API", description="自動化爬取 GPU 相關資訊的 API")
 
 # 初始化 colorama
 init()
@@ -21,12 +33,6 @@ DEFAULT_BASE_URL = 'https://www.techpowerup.com'
 
 # 添加工作目錄到路徑
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# 導入自定義模組
-from utils.anti_crawl import AntiCrawl
-from utils.parsers import GPUParser
-from utils.database import Database
-from utils.state_manager import ScrapeState, StorageManager  # 新增導入
 
 # 設置詳細日誌
 logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
@@ -155,16 +161,55 @@ class GPUScraper:
                 })
         
         return review_contents
+    async def setup_product_cache(self):
+        """建立產品名稱快取，使用通用方法處理廠商名稱"""
+        self.product_cache = {}  # 格式: {簡化名稱: ID}
+        
+        # 查詢所有已存在的產品
+        query = "SELECT F_SeqNo, F_Product FROM dbo.C_Product"
+        
+        def fetch_products():
+            self.db.cursor.execute(query)
+            return self.db.cursor.fetchall()
+        
+        products = await self.db.run_db_query(fetch_products)
+        
+        # 處理每個產品名稱，建立映射
+        for product_id, product_name in products:
+            # 存儲原始完整名稱
+            self.product_cache[product_name] = product_id
+            
+            # 通用方法：去掉第一個空格前的部分（廠商名）
+            if ' ' in product_name:
+                simplified_name = product_name.split(' ', 1)[1]
+                self.product_cache[simplified_name] = product_id
+                logger.debug(f"產品映射: '{product_name}' → '{simplified_name}' (ID: {product_id})")
+        
+        logger.info(f"已建立產品快取，包含 {len(products)} 個產品，總映射數量: {len(self.product_cache)}")
+        return self.product_cache
     
     async def product_worker(self):
         """處理產品佇列的工作協程"""
+         # 確保產品快取已建立
+        if not hasattr(self, 'product_cache'):
+            await self.setup_product_cache()
+
         while True:
             try:
                 gpu = await self.product_queue.get()
+                product_name = gpu['name']
                 
                 logger.info(f"開始處理產品: {gpu['name']}")
                 print(f"{Fore.CYAN}正在處理 GPU: {gpu['name']}{Style.RESET_ALL}")
-                
+
+                # 檢查方案: 直接檢查產品名稱是否在快取中
+                if product_name in self.product_cache:
+                    product_id = self.product_cache[product_name]
+                    logger.info(f"產品 '{product_name}' 已存在 (ID: {product_id})，跳過處理")
+                    print(f"{Fore.YELLOW}產品 '{product_name}' 已存在，跳過處理{Style.RESET_ALL}")
+                    self.product_queue.task_done()
+                    continue
+
                 # 爬取產品詳情
                 product_data, specs_data, board_data = await self.scrape_product_detail(gpu)
                 

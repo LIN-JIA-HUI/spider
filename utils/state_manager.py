@@ -74,6 +74,18 @@ class StorageManager:
     async def store_product_complete(self, product_data, specs_data, board_data=None):
         """完整處理一個產品的所有資料存儲，確保事務一致性"""
         try:
+            # 先檢查產品是否已存在
+            product_name = product_data.get('F_Product', '未知產品')
+            
+            # 檢查產品是否已存在於資料庫
+            check_sql = "SELECT F_SeqNo FROM dbo.C_Product WHERE F_Product = ?"
+            product_exist = await self.db.run_db_query(lambda: self.db.cursor.execute(check_sql, [product_name]).fetchone())
+            
+            if product_exist:
+                # 產品已存在，直接跳過
+                logger.info(f"產品 '{product_name}' 已存在於資料庫，跳過處理")
+                return product_exist[0]  # 返回現有產品 ID
+            
             # 嘗試使用單一事務處理
             try:
                 product_id, categories = await self.db.create_product_with_specs(product_data, specs_data)
