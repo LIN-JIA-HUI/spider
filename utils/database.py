@@ -415,7 +415,7 @@ class Database:
                         
                         if existing_category:
                             categories[category_name] = existing_category[1]
-                            logger.info(f"找到現有規格類別: {category_name} (ID: {existing_category[1]})")
+                            # logger.info(f"找到現有規格類別: {category_name} (ID: {existing_category[1]})")
                         else:
                             # 創建新類別
                             self.cursor.execute(

@@ -433,7 +433,7 @@ class GPUParser:
                             'original_text': text,  # 保留原始文本供參考
                             'value': value
                         })
-                        logger.info(f"找到評測選項: {clean_text}, URL: {value}")
+                        # logger.info(f"找到評測選項: {clean_text}, URL: {value}")
                         break
         except Exception as e:
             logger.error(f"解析評測選項時出錯: {str(e)}")
@@ -606,7 +606,7 @@ class GPUParser:
                             if "dBA" in cell_text and not noise_found:
                                 # 至少是第3個單元格，且在找到溫度之後
                                 if i >= 3:
-                                    noise_match = re.search(r'(\d+\.\d+)', cell_text)
+                                    noise_match = re.search(r'(\d+(?:\.\d+)?)', cell_text)
                                     if noise_match:
                                         noise = noise_match.group(1)
                                         review_specs_data.append({

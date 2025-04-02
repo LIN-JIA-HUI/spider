@@ -34,21 +34,54 @@ DEFAULT_BASE_URL = 'https://www.techpowerup.com'
 # 添加工作目錄到路徑
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# 設置詳細日誌
-logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
-os.makedirs(logs_dir, exist_ok=True)
-log_file = os.path.join(logs_dir, f'scraper_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+# 設置日誌格式
+log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+# 僅設置控制台輸出
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
 
+# 配置根 logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)  # 您可以調整日誌級別，如改為 logging.WARNING 減少輸出
+root_logger.handlers = []  # 清除任何現有的處理器
+root_logger.addHandler(console_handler)
+
+# 獲取該模塊的 logger
 logger = logging.getLogger(__name__)
+
+# 添加 API 路由
+@app.get("/")
+def read_root():
+    return {"message": "GPU 爬蟲 API 已啟動"}
+
+@app.get("/run-scraper")
+async def run_scraper(background_tasks: BackgroundTasks):
+    """啟動爬蟲的 API 端點"""
+    background_tasks.add_task(start_scraper)
+    return {"message": "爬蟲已在背景啟動"}
+
+
+# 全局變數用於追蹤爬蟲狀態
+is_scraper_running = False
+
+# 背景任務執行爬蟲
+async def start_scraper():
+    global is_scraper_running
+    if is_scraper_running:
+        logger.info("爬蟲已在執行，忽略本次請求")
+        return
+    
+    try:
+        is_scraper_running = True
+        scraper = GPUScraper()
+        await scraper.run()
+    except Exception as e:
+        logger.error(f"爬蟲執行錯誤: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+    finally:
+        is_scraper_running = False
 
 class GPUScraper:
     """GPU 爬蟲主類"""
@@ -88,7 +121,7 @@ class GPUScraper:
                 headers = self.anti_crawl.get_headers()
                 logger.info(f"請求 URL: {url}")
                 
-                async with self.session.get(url, headers=headers, timeout=400) as response:
+                async with self.session.get(url, headers=headers, timeout=200) as response:
                     response.raise_for_status()
                     html = await response.text()
                 
@@ -467,17 +500,5 @@ def convert_to_specs_data(board):
 
 # 入口點
 if __name__ == "__main__":
-    try:
-        # # 解析命令列參數
-        # import argparse
-        # parser = argparse.ArgumentParser(description='TechPowerUp GPU 爬蟲')
-        # parser.add_argument('--limit', type=int, help='限制爬取的 GPU 數量（用於測試）')
-        # args = parser.parse_args()
-        
-        # 執行爬蟲
-        scraper = GPUScraper()
-        asyncio.run(scraper.run())
-    except KeyboardInterrupt:
-        print(f"{Fore.YELLOW}使用者中斷爬蟲程序{Style.RESET_ALL}")
-        logger.info("使用者中斷爬蟲程序")
-        sys.exit(0)
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,0 +1,9 @@
+aiohttp
+asyncio
+colorama
+fastapi
+python-dotenv
+uvicorn
+fake-useragent
+beautifulsoup4
+pyodbc
