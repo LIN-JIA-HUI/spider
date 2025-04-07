@@ -1,5 +1,6 @@
 import os
 import sys
+import gc
 import logging
 import aiohttp  # 改用 aiohttp 代替 requests
 import asyncio
@@ -239,7 +240,7 @@ class GPUScraper:
                 if product_name in self.product_cache:
                     product_id = self.product_cache[product_name]
                     logger.info(f"產品 '{product_name}' 已存在 (ID: {product_id})，跳過處理")
-                    print(f"{Fore.YELLOW}產品 '{product_name}' 已存在，跳過處理{Style.RESET_ALL}")
+                    # print(f"{Fore.YELLOW}產品 '{product_name}' 已存在，跳過處理{Style.RESET_ALL}")
                     self.product_queue.task_done()
                     continue
 
@@ -311,6 +312,8 @@ class GPUScraper:
                     import traceback
                     logger.error(traceback.format_exc())
                 
+                gc.collect()  # 強制垃圾回收
+                logger.info(f"已強制進行垃圾回收，完成處理產品: {gpu['name']}")
                 # 標記任務完成
                 self.product_queue.task_done()
                 logger.info(f"完成處理產品: {gpu['name']}")
@@ -344,6 +347,8 @@ class GPUScraper:
                 else:
                     logger.warning(f"無法獲取主板 {board_task['board_name']} 的評測內容")
                 
+                gc.collect()  # 強制垃圾回收
+                logger.info(f"已強制進行垃圾回收，完成處理主板評測: {board_task['board_name']}")
                 # 標記任務完成
                 self.board_queue.task_done()
                 
