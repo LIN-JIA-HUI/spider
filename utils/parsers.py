@@ -416,6 +416,7 @@ class GPUParser:
                 'Temperatures & Fan noise',
                 'Cooler Performance Comparison',
                 'Overclocking & Power Limits',
+                'Overclocking'
                 'Circuit Board Analysis',
             ]
             
@@ -561,103 +562,139 @@ class GPUParser:
             content['images'] = images_data
             
             # 根據評測類型提取結構化數據
-            if "Temperature" in review_type or "Fan noise" in review_type:
-                # 找到表格
+            if "Temperature" in review_type or "Fan noise" in review_type or "Noise" in review_type:
+                # 找到表格和active行
                 table = soup.find('table', class_='tputbl')
                 
-                if table:
-                    # 找到第一個active行
-                    active_row = table.find('tr', class_='active')
+                if table and (active_row := table.find('tr', class_='active')):
+                    rows = table.find_all('tr')
                     
-                    if active_row:
-                        # 獲取所有單元格
+                    if len(rows) >= 3:
+                        # 獲取表頭和欄位名稱
+                        category_row = rows[1]  # Idle/Gaming 所在行
+                        field_row = rows[2]     # GPU/Memory/Noise 所在行
+                        
+                        # 獲取欄位名稱
+                        field_names = [cell.get_text(strip=True).lower() for cell in field_row.find_all('th')]
+                        
+                        # 找出 idle 和 Gaming 的範圍
+                        category_cells = category_row.find_all('th')
+                        current_index = 0
+                        idle_range = gaming_range = None
+                        
+                        for cell in category_cells:
+                            cell_text = cell.get_text(strip=True).lower()
+                            colspan = int(cell.get('colspan', 1))
+                            
+                            if cell_text == 'idle':
+                                idle_range = (current_index, current_index + colspan - 1)
+                            elif cell_text == 'gaming':
+                                gaming_range = (current_index, current_index + colspan - 1)
+                            
+                            current_index += colspan
+                        
+                        # 動態尋找各欄位的索引
+                        field_indices = {}
+                        for i, name in enumerate(field_names):
+                            if idle_range and i >= idle_range[0] and i <= idle_range[1] and name == 'gpu':
+                                field_indices['idle_gpu'] = i
+                            if gaming_range and i >= gaming_range[0] and i <= gaming_range[1]:
+                                if name == 'gpu':
+                                    field_indices['gaming_gpu'] = i
+                                elif name == 'memory':
+                                    field_indices['memory'] = i
+                                elif name == 'noise':
+                                    field_indices['gaming_noise'] = i
+                        
+                        # 獲取顯卡名稱和單元格
+                        card_name = active_row.find('th').get_text(strip=True) if active_row.find('th') else "未知顯卡"
                         cells = active_row.find_all('td')
                         
-                        # 打印調試信息
-                        logger.info(f"找到 {len(cells)} 個單元格")
-                        for i, cell in enumerate(cells):
-                            logger.info(f"單元格 {i}: '{cell.get_text(strip=True)}'")
+                        # 抓取各項資料
+                        results = {}
+                        field_mapping = {
+                            'idle_gpu': ('IdleGPUTemp', r'(\d+)[°℃]'),
+                            'gaming_gpu': ('GamingGPUTemp', r'(\d+)[°℃]'),
+                            'memory': ('MemoryTemp', r'(\d+)[°℃]'),
+                            'gaming_noise': ('NoiseLevel', r'(\d+(?:\.\d+)?)\s*dBA')
+                        }
                         
-                        # 智能識別溫度和噪音值
-                        temp_found = False
-                        noise_found = False
-                        
-                        for i, cell in enumerate(cells):
-                            cell_text = cell.get_text(strip=True)
-                            
-                            # 尋找Gaming區域的GPU溫度
-                            if "°C" in cell_text and not temp_found:
-                                # 至少是第3個單元格(索引2)，確保是Gaming區域
-                                if i >= 2:
-                                    gpu_temp_match = re.search(r'(\d+)', cell_text)
-                                    if gpu_temp_match:
-                                        gpu_temp = gpu_temp_match.group(1)
+                        # 遍歷字段抓取數據
+                        for field_key, (display_name, regex_pattern) in field_mapping.items():
+                            if field_key in field_indices:
+                                cell_index = field_indices[field_key] - 1  # 調整索引偏移
+                                if 0 <= cell_index < len(cells):
+                                    cell_text = cells[cell_index].get_text(strip=True)
+                                    if match := re.search(regex_pattern, cell_text):
+                                        value = match.group(1)
+                                        results[field_key] = value
                                         review_specs_data.append({
                                             'category': 'Physical Properties',
-                                            'name': 'Temp',
-                                            'value': gpu_temp
-                                        })
-                                        logger.info(f"成功抓取GPU溫度: {gpu_temp}°C")
-                                        temp_found = True
-                                    else:
-                                        logger.warning(f"未找到GPU溫度")
-                            
-                            # 尋找Gaming區域的噪音值
-                            if "dBA" in cell_text and not noise_found:
-                                # 至少是第3個單元格，且在找到溫度之後
-                                if i >= 3:
-                                    noise_match = re.search(r'(\d+(?:\.\d+)?)', cell_text)
-                                    if noise_match:
-                                        noise = noise_match.group(1)
-                                        review_specs_data.append({
-                                            'category': 'Physical Properties',
-                                            'name': 'Noise',
-                                            'value': noise
-                                        })
-                                        logger.info(f"成功抓取噪音值: {noise} dBA")
-                                        noise_found = True
-                                    else:
-                                        logger.warning(f"未找到噪音值")
-                            
-            # 超頻和功耗限制表格解析
-            # 超頻表格解析 - 簡化版本
-            elif "Overclocking" in review_type or "Power Limits" in review_type:
-                try:
-                    # 找到第一個active行
-                    active_row = soup.find('tr', class_='active')
-                    
-                    if active_row:
-                        # 獲取所有td單元格
-                        cells = active_row.find_all('td')
-                        
-                        # 確定單元格數量足夠
-                        if len(cells) >= 5:
-                            # 定義我們要提取的列
-                            columns = [
-                                {"name": "AvgGPUClock", "index": 0},
-                                {"name": "MaxMemoryClock", "index": 1},
-                                {"name": "Performance", "index": 2},
-                                {"name": "PwrLimitDefMax", "index": 3},
-                                {"name": "OCPerfMaxPwr", "index": 4}
-                            ]
-                            
-                            # 提取每個列的數據
-                            for column in columns:
-                                idx = column["index"]
-                                if idx < len(cells):
-                                    value = cells[idx].get_text(strip=True)
-                                    if value and value != "…":
-                                        review_specs_data.append({
-                                            'category': 'TDP Compare',
-                                            'name': column["name"],
+                                            'name': display_name,
                                             'value': value
                                         })
-                                        logger.info(f"成功抓取 {column['name']}: {value}")
+                                        logger.info(f"{card_name} - 成功抓取{display_name}: {value}")
+                    else:
+                        logger.warning("表格結構不完整，未找到足夠的行")
+                else:
+                    logger.warning("未找到溫度或噪音相關的表格或被選中顯卡")             
+            # 超頻和功耗限制表格解析
+            # 超頻表格解析 - 簡化版本
+            # 根據評測類型提取超頻資料
+            elif "Overclocking" in review_type or "Power Limits" in review_type:
+                # 找到表格和active行
+                table = soup.find('table', class_='tputbl')
                 
-                except Exception as e:
-                    logger.error(f"解析超頻數據時出錯: {str(e)}")
-                    import traceback
-                    logger.error(traceback.format_exc())
+                if table and (active_row := table.find('tr', class_='active')):
+                    logger.info("找到被選中的顯卡行")
+                    rows = table.find_all('tr')
+                    
+                    if len(rows) >= 2:
+                        # 獲取欄位名稱行（通常是第二行，索引1）
+                        field_row = rows[1]
+                        field_cells = field_row.find_all('th')
+                        
+                        # 獲取欄位名稱（跳過第一個，因為它是顯卡名稱）
+                        field_names = [cell.get_text(strip=True).lower() for cell in field_cells][1:]
+                        logger.info(f"欄位名稱: {field_names}")
+                        
+                        # 獲取顯卡名稱和單元格
+                        card_name = active_row.find('th').get_text(strip=True) if active_row.find('th') else "未知顯卡"
+                        cells = active_row.find_all('td')
+                        
+                        # 定義欄位映射（欄位顯示名稱與資料庫存儲名稱的對應）
+                        field_mapping = {
+                            'avg. gpu clock': 'AvgGPUClock',
+                            'max. memory clock': 'MaxMemoryClock',
+                            'performance': 'Performance',
+                            'pwr limit def/max': 'PwrLimitDefMax',
+                            'oc perf at max pwr': 'OCPerfMaxPwr'
+                        }
+                        
+                        # 動態構建欄位索引映射
+                        field_indices = {}
+                        for i, name in enumerate(field_names):
+                            name_lower = name.lower()
+                            if name_lower in field_mapping:
+                                field_indices[field_mapping[name_lower]] = i
+                        
+                        logger.info(f"欄位索引: {field_indices}")
+                        
+                        # 抓取各項資料
+                        for db_field_name, index in field_indices.items():
+                            if index < len(cells):
+                                value = cells[index].get_text(strip=True)
+                                if value and value != "…":
+                                    review_specs_data.append({
+                                        'category': 'TDP Compare',
+                                        'name': db_field_name,
+                                        'value': value
+                                    })
+                                    logger.info(f"{card_name} - 成功抓取 {db_field_name}: {value}")
+                    else:
+                        logger.warning("表格結構不完整，未找到足夠的行")
+                else:
+                    logger.warning("未找到超頻資料表格或被選中顯卡")
             
             # ========== 改進的電路板分析數據提取 ==========
             elif "Circuit" in review_type or "PCB" in review_type or "Board Analysis" in review_type:
