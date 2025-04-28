@@ -6,6 +6,9 @@ import aiohttp  # 改用 aiohttp 代替 requests
 import asyncio
 import time
 import random
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from urllib.parse import urljoin
 from colorama import init, Fore, Style
 from dotenv import load_dotenv
@@ -59,28 +62,151 @@ def read_root():
 @app.get("/run-scraper")
 async def run_scraper(background_tasks: BackgroundTasks):
     """啟動爬蟲的 API 端點"""
+    global is_scraper_running
+    
+    if is_scraper_running:
+        return {
+            "success": False,
+            "message": "爬蟲已在執行中，請稍後再試"
+        }
+    
     background_tasks.add_task(start_scraper)
-    return {"message": "爬蟲已在背景啟動"}
+    return {
+        "success": True,
+        "message": "爬蟲已在背景啟動，完成後將發送郵件通知"
+    }
+
+@app.get("/status")
+async def get_status():
+    """獲取爬蟲狀態和最近一次結果的 API 端點"""
+    return {
+        "is_running": is_scraper_running,
+        "last_result": last_scrape_result
+    }
 
 
-# 全局變數用於追蹤爬蟲狀態
+# 全局變數用於追蹤爬蟲狀態和結果
 is_scraper_running = False
+last_scrape_result = None
+
+# 發送郵件函數
+def send_email(subject, body, recipients=None):
+    """發送郵件通知"""
+    # 從環境變數獲取郵件設置
+    sender_email = "DAD Center <DADCenter@msi.com.tw>"
+    smtp_server = "172.16.0.10"
+    smtp_port = "25"
+    
+    # 如果未提供收件人，從環境變數獲取
+    if not recipients:
+        recipients_str = "dad_service@msi.com.tw"
+        recipients = [r.strip() for r in recipients_str.split(",") if r.strip()]
+    
+    # 檢查必要參數
+    if not smtp_server or not sender_email or not recipients:
+        logger.error("郵件設置不完整，無法發送郵件通知")
+        return False
+    
+    # 創建郵件
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = ", ".join(recipients)
+    msg['Subject'] = subject
+    
+    msg.attach(MIMEText(body, 'plain'))
+    
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.send_message(msg)
+        server.quit()
+        logger.info(f"郵件已成功發送給 {recipients}")
+        return True
+    except Exception as e:
+        logger.error(f"發送郵件時出錯: {str(e)}")
+        return False
 
 # 背景任務執行爬蟲
 async def start_scraper():
-    global is_scraper_running
+    global is_scraper_running, last_scrape_result
     if is_scraper_running:
         logger.info("爬蟲已在執行，忽略本次請求")
         return
     
+    start_time = datetime.now()
+    
     try:
         is_scraper_running = True
+        logger.info(f"爬蟲開始執行: {start_time.isoformat()}")
+        
         scraper = GPUScraper()
         await scraper.run()
+        
+        # 獲取爬蟲統計結果
+        stats = scraper.state.get_stats()
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        # 更新全局變量，保存結果
+        last_scrape_result = {
+            "started_at": start_time.isoformat(),
+            "completed_at": end_time.isoformat(),
+            "stats": {
+                "products": stats['products'],
+                "specs": stats['specs'],
+                "reviews": stats['reviews'],
+                "elapsed_time": round(stats['elapsed_time'], 2)
+            },
+            "success": True
+        }
+        
+        logger.info(f"爬蟲完成: {end_time.isoformat()}, 耗時: {duration}秒")
+        
+        # 發送郵件通知
+        email_subject = "GPU 爬蟲完成通知"
+        email_body = f"""爬蟲已完成！
+
+開始時間: {start_time.strftime('%Y-%m-%d %H:%M:%S')}
+完成時間: {end_time.strftime('%Y-%m-%d %H:%M:%S')}
+總耗時: {round(duration, 2)}秒
+
+統計信息:
+- 共處理 {stats['products']} 個 GPU
+- 共處理 {stats['specs']} 條規格
+- 共處理 {stats['reviews']} 個評測
+
+此郵件由自動系統發送，請勿回覆。"""
+        
+        send_email(email_subject, email_body)
+        
     except Exception as e:
         logger.error(f"爬蟲執行錯誤: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
+        
+        # 記錄錯誤信息
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        last_scrape_result = {
+            "started_at": start_time.isoformat(),
+            "completed_at": end_time.isoformat(),
+            "error": str(e),
+            "success": False
+        }
+        
+        # 發送錯誤通知郵件
+        email_subject = "GPU 爬蟲執行失敗通知"
+        email_body = f"""爬蟲執行失敗！
+
+開始時間: {start_time.strftime('%Y-%m-%d %H:%M:%S')}
+失敗時間: {end_time.strftime('%Y-%m-%d %H:%M:%S')}
+總耗時: {round(duration, 2)}秒
+
+錯誤信息: {str(e)}
+
+此郵件由自動系統發送，請勿回覆。"""
+        
+        send_email(email_subject, email_body)
     finally:
         is_scraper_running = False
 
