@@ -30,10 +30,10 @@ class Database:
             trusted_connection = os.getenv('DB_TRUSTED_CONNECTION')
             
             # 使用 Windows 身份驗證連接
-            # connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
+            connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};Trusted_Connection={trusted_connection}'
 
             # 使用 sql server 連接
-            connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
+            # connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
 
             conn = pyodbc.connect(connection_string)
             

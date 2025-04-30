@@ -416,7 +416,7 @@ class GPUParser:
                 'Temperatures & Fan noise',
                 'Cooler Performance Comparison',
                 'Overclocking & Power Limits',
-                'Overclocking'
+                'Overclocking',
                 'Circuit Board Analysis',
             ]
             
@@ -1084,3 +1084,30 @@ class GPUParser:
         
         return content, review_data, review_specs_data
     
+
+    @staticmethod
+    def parse_review_posted_date(html):
+        """解析評測頁面的發布日期"""
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            # 一般評測日期在具有特定類別的元素中
+            date_element = soup.select_one('div.date')
+            
+            if date_element:
+                date_text = date_element.get_text(strip=True)
+                # 從文本中提取日期，格式通常類似 "Posted: Jan 15, 2023"
+                match = re.search(r'Posted:\s+(\w+)\s+(\d+),\s+(\d{4})', date_text)
+                if match:
+                    month_name, day, year = match.groups()
+                    # 將月份名稱轉換為數字
+                    month_dict = {
+                        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+                        'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                    }
+                    month = month_dict.get(month_name, 1)
+                    return f"{year}-{month:02d}-{int(day):02d}"
+            
+            return None
+        except Exception as e:
+            logger.error(f"解析評測發布日期時出錯: {str(e)}")
+            return None

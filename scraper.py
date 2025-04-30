@@ -60,8 +60,8 @@ def read_root():
     return {"message": "GPU 爬蟲 API 已啟動"}
 
 @app.get("/run-scraper")
-async def run_scraper(background_tasks: BackgroundTasks):
-    """啟動爬蟲的 API 端點"""
+async def run_scraper(background_tasks: BackgroundTasks, mode: str = None):
+    """啟動爬蟲的 API 端點，支持不同的運行模式"""
     global is_scraper_running
     
     if is_scraper_running:
@@ -70,20 +70,55 @@ async def run_scraper(background_tasks: BackgroundTasks):
             "message": "爬蟲已在執行中，請稍後再試"
         }
     
-    background_tasks.add_task(start_scraper)
-    return {
-        "success": True,
-        "message": "爬蟲已在背景啟動，完成後將發送郵件通知"
-    }
-
+    # 根據模式決定要啟動的任務
+    if mode is None:
+        # 原始模式 - 完整爬蟲
+        background_tasks.add_task(start_scraper)
+        return {
+            "success": True,
+            "message": "爬蟲已在背景啟動，完成後將發送郵件通知"
+        }
+    elif mode == "full":
+        # 全量更新模式
+        from utils.update_manager import UpdateManager
+        background_tasks.add_task(start_full_update)
+        return {
+            "success": True,
+            "message": "全量更新任務已在背景啟動，完成後將發送郵件通知"
+        }
+    elif mode == "incremental":
+        # 增量更新模式
+        from utils.update_manager import UpdateManager
+        background_tasks.add_task(start_incremental_update)
+        return {
+            "success": True,
+            "message": "增量更新任務已在背景啟動，完成後將發送郵件通知"
+        }
+    else:
+        return {
+            "success": False,
+            "message": "無效的模式參數，有效值：null (原始爬蟲), full (全量更新), incremental (增量更新)"
+        }
+    
 @app.get("/status")
 async def get_status():
     """獲取爬蟲狀態和最近一次結果的 API 端點"""
-    return {
+    global is_scraper_running, last_scrape_result, current_scraper
+    
+    status = {
         "is_running": is_scraper_running,
         "last_result": last_scrape_result
     }
-
+    
+    # 如果當前有正在運行的爬蟲，獲取其詳細狀態
+    if is_scraper_running and 'current_scraper' in globals() and current_scraper:
+        try:
+            current_state = current_scraper.state.get_status()
+            status["current_task"] = current_state
+        except Exception as e:
+            logger.error(f"獲取當前狀態時出錯: {str(e)}")
+    
+    return status
 
 # 全局變數用於追蹤爬蟲狀態和結果
 is_scraper_running = False
@@ -209,6 +244,195 @@ async def start_scraper():
         send_email(email_subject, email_body)
     finally:
         is_scraper_running = False
+
+
+# 全量更新背景任務
+async def start_full_update():
+    global is_scraper_running, last_scrape_result, current_scraper
+    if is_scraper_running:
+        logger.info("爬蟲已在執行，忽略本次請求")
+        return
+    
+    start_time = datetime.now()
+    
+    try:
+        is_scraper_running = True
+        logger.info(f"全量更新開始執行: {start_time.isoformat()}")
+        
+        # 初始化爬蟲和更新管理器
+        scraper = GPUScraper()
+        from utils.update_manager import UpdateManager
+        update_manager = UpdateManager(scraper, scraper.db, scraper.state, scraper.storage_manager)
+        
+        # 設置狀態
+        scraper.state.set_running(True)
+        scraper.state.set_task_info("全量更新")
+        scraper.state.set_progress(0)
+
+        # 執行全量更新
+        update_count = await update_manager.full_update()
+
+        # 完成後更新狀態
+        scraper.state.set_running(False)
+        scraper.state.set_progress(100)
+        scraper.state.set_task_result("成功")
+        scraper.state.set_last_update_time(datetime.now())
+        scraper.state.set_last_update_count(update_count)
+        
+        # 獲取爬蟲統計結果
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        # 更新全局變量，保存結果
+        last_scrape_result = {
+            "mode": "full_update",
+            "started_at": start_time.isoformat(),
+            "completed_at": end_time.isoformat(),
+            "stats": {
+                "updated_reviews": update_count,
+                "elapsed_time": round(duration, 2)
+            },
+            "success": True
+        }
+        
+        logger.info(f"全量更新完成: {end_time.isoformat()}, 耗時: {duration}秒, 更新了 {update_count} 個評測")
+        
+        # 發送郵件通知
+        email_subject = "GPU 爬蟲全量更新完成通知"
+        email_body = f"""全量更新已完成！
+
+開始時間: {start_time.strftime('%Y-%m-%d %H:%M:%S')}
+完成時間: {end_time.strftime('%Y-%m-%d %H:%M:%S')}
+總耗時: {round(duration, 2)}秒
+
+統計信息:
+- 共更新 {update_count} 個評測
+
+此郵件由自動系統發送，請勿回覆。"""
+        
+        # send_email(email_subject, email_body)
+        
+    except Exception as e:
+        logger.error(f"全量更新執行錯誤: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # 記錄錯誤信息
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        last_scrape_result = {
+            "mode": "full_update",
+            "started_at": start_time.isoformat(),
+            "completed_at": end_time.isoformat(),
+            "error": str(e),
+            "success": False
+        }
+        
+        
+        # 發送錯誤通知郵件
+        email_subject = "GPU 爬蟲全量更新失敗通知"
+        email_body = f"""全量更新執行失敗！
+
+開始時間: {start_time.strftime('%Y-%m-%d %H:%M:%S')}
+失敗時間: {end_time.strftime('%Y-%m-%d %H:%M:%S')}
+總耗時: {round(duration, 2)}秒
+
+錯誤信息: {str(e)}
+
+此郵件由自動系統發送，請勿回覆。"""
+        
+        # send_email(email_subject, email_body)
+    finally:
+        is_scraper_running = False
+
+# 增量更新背景任務
+async def start_incremental_update():
+    global is_scraper_running, last_scrape_result
+    if is_scraper_running:
+        logger.info("爬蟲已在執行，忽略本次請求")
+        return
+    
+    start_time = datetime.now()
+    
+    try:
+        is_scraper_running = True
+        logger.info(f"增量更新開始執行: {start_time.isoformat()}")
+        
+        # 初始化爬蟲和更新管理器
+        scraper = GPUScraper()
+        from utils.update_manager import UpdateManager
+        update_manager = UpdateManager(scraper, scraper.db, scraper.state, scraper.storage_manager)
+        
+        # 執行增量更新
+        update_count = await update_manager.incremental_update()
+        
+        # 獲取爬蟲統計結果
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        # 更新全局變量，保存結果
+        last_scrape_result = {
+            "mode": "incremental_update", 
+            "started_at": start_time.isoformat(),
+            "completed_at": end_time.isoformat(),
+            "stats": {
+                "updated_reviews": update_count,
+                "elapsed_time": round(duration, 2)
+            },
+            "success": True
+        }
+        
+        logger.info(f"增量更新完成: {end_time.isoformat()}, 耗時: {duration}秒, 更新了 {update_count} 個評測")
+        
+        # 發送郵件通知
+        email_subject = "GPU 爬蟲增量更新完成通知"
+        email_body = f"""增量更新已完成！
+
+開始時間: {start_time.strftime('%Y-%m-%d %H:%M:%S')}
+完成時間: {end_time.strftime('%Y-%m-%d %H:%M:%S')}
+總耗時: {round(duration, 2)}秒
+
+統計信息:
+- 共更新 {update_count} 個評測
+
+此郵件由自動系統發送，請勿回覆。"""
+        
+        # send_email(email_subject, email_body)
+        
+    except Exception as e:
+        logger.error(f"增量更新執行錯誤: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # 記錄錯誤信息
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        last_scrape_result = {
+            "mode": "incremental_update",
+            "started_at": start_time.isoformat(),
+            "completed_at": end_time.isoformat(),
+            "error": str(e),
+            "success": False
+        }
+        
+        # 發送錯誤通知郵件
+        email_subject = "GPU 爬蟲增量更新失敗通知"
+        email_body = f"""增量更新執行失敗！
+
+開始時間: {start_time.strftime('%Y-%m-%d %H:%M:%S')}
+失敗時間: {end_time.strftime('%Y-%m-%d %H:%M:%S')}
+總耗時: {round(duration, 2)}秒
+
+錯誤信息: {str(e)}
+
+此郵件由自動系統發送，請勿回覆。"""
+        
+        # send_email(email_subject, email_body)
+    finally:
+        is_scraper_running = False
+
 
 class GPUScraper:
     """GPU 爬蟲主類"""
