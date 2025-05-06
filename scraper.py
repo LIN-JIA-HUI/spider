@@ -555,7 +555,7 @@ class GPUScraper:
                 headers = self.anti_crawl.get_headers()
                 logger.info(f"請求 URL: {url}")
                 
-                async with self.session.get(url, headers=headers, timeout=200) as response:
+                async with self.session.get(url, headers=headers, timeout=100) as response:
                     response.raise_for_status()
                     html = await response.text()
                 
