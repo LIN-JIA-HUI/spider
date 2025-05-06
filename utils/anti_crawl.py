@@ -13,8 +13,8 @@ class AntiCrawl:
     
     def __init__(self):
         self.ua = UserAgent()
-        self.min_delay = 60
-        self.max_delay = 120
+        self.min_delay = 30
+        self.max_delay = 60
         self.retry_delays = [600, 900, 1200, 1800, 2400, 3600, 4800, 7200, 10800, 14400, 21600, 28800, 43200, 57600, 86400]
         self.max_retries = len(self.retry_delays)
     

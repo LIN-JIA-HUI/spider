@@ -14,6 +14,12 @@ class ScrapeState:
         self.reviews_count = 0
         self.error_count = 0
         self.start_time = time.time()
+        self._running = False
+        self._task_info = ""
+        self._progress = 0
+        self._task_result = ""
+        self._last_update_time = None
+        self._last_update_count = 0
     
     def add_product(self, product_id, product_name):
         """添加已處理的產品"""
@@ -62,7 +68,60 @@ class ScrapeState:
             'errors': self.error_count,
             'elapsed_time': time.time() - self.start_time
         }
-
+    def is_running(self):
+        """檢查爬蟲是否正在運行"""
+        return self._running
+    
+    def set_running(self, running):
+        """設置爬蟲運行狀態"""
+        self._running = running
+        if running:
+            # 重設起始時間
+            self.start_time = time.time()
+        
+    def set_task_info(self, info):
+        """設置當前任務信息"""
+        self._task_info = info
+    
+    def set_progress(self, progress):
+        """設置進度百分比(0-100)"""
+        self._progress = progress
+    
+    def set_task_result(self, result):
+        """設置任務結果"""
+        self._task_result = result
+    
+    def set_last_update_time(self, update_time):
+        """設置最後更新時間"""
+        self._last_update_time = update_time
+    
+    def set_last_update_count(self, count):
+        """設置最後更新的評測數量"""
+        self._last_update_count = count
+    
+    def get_status(self):
+        """獲取當前狀態的字典表示"""
+        status = {
+            'running': self._running,
+            'task_info': self._task_info,
+            'progress': self._progress,
+            'started_at': datetime.fromtimestamp(self.start_time).isoformat() if self.start_time else None,
+            'task_result': self._task_result,
+            'updated_count': self._last_update_count,
+            'last_update_time': self._last_update_time.isoformat() if self._last_update_time else None
+        }
+        
+        # 如果是普通爬蟲模式，添加基本統計信息
+        if self._task_info == "" or self._task_info == "完整爬蟲":
+            stats = self.get_stats()
+            status.update({
+                'products_count': stats['products'],
+                'specs_count': stats['specs'],
+                'reviews_count': stats['reviews'],
+                'error_count': stats['errors']
+            })
+            
+        return status
 class StorageManager:
 
     """管理資料存儲的類"""

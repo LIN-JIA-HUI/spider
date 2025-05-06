@@ -1054,3 +1054,39 @@ class GPUParser:
         
         return content, review_data, review_specs_data
     
+
+    @staticmethod
+    def parse_review_posted_date(html):
+        """解析評測頁面的發布日期"""
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 尋找 time 標籤
+            time_element = soup.select_one('time')
+            
+            if time_element:
+                # 直接從 datetime 屬性獲取日期時間
+                datetime_attr = time_element.get('datetime')
+                if datetime_attr:
+                    # 從 datetime 屬性中提取日期部分 (YYYY-MM-DD)
+                    date_match = re.search(r'(\d{4}-\d{2}-\d{2})', datetime_attr)
+                    if date_match:
+                        return date_match.group(1)
+                
+                # 如果無法從 datetime 屬性獲取，嘗試從文字內容解析
+                date_text = time_element.get_text(strip=True)
+                # 解析格式如 "Mar 5th, 2025"
+                match = re.search(r'(\w+)\s+(\d+)(?:st|nd|rd|th),\s+(\d{4})', date_text)
+                if match:
+                    month_name, day, year = match.groups()
+                    # 將月份名稱轉換為數字
+                    month_dict = {
+                        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+                        'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                    }
+                    month = month_dict.get(month_name, 1)
+                    return f"{year}-{month:02d}-{int(day):02d}"
+            
+        except Exception as e:
+            logger.error(f"解析評測發布日期時出錯: {str(e)}")
+            return None
