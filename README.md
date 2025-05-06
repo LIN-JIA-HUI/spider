@@ -6,7 +6,7 @@
 
 ## 系統需求
 
-- Python 3.8+
+- Python 3.10+
 - SQL Server 資料庫
   - 正式環境與測試爬蟲機：必須使用 SQL Server 18
   - 本地開發環境：可依據個人電腦已安裝的 SQL Server 版本
@@ -43,7 +43,7 @@ python scraper.py
 
 ## API 端點說明
 
-系統提供以下 REST API 端點:
+系統提供以下 API 端點:
 
 ### 1. 啟動爬蟲 - 完整模式
 
@@ -272,8 +272,8 @@ curl "http://localhost:8104/run-scraper?mode=full"
 
 ```sql
 -- 在 C_Product_Review 表中添加兩個欄位
-ALTER TABLE dbo.C_Product_Review ADD F_Main_Review_URL NVARCHAR(500);
-ALTER TABLE dbo.C_Product_Review ADD F_Page_URL NVARCHAR(500);
+ALTER TABLE PM.dbo.C_Product_Review ADD F_Main_Review_URL NVARCHAR(500);
+ALTER TABLE PM.dbo.C_Product_Review ADD F_Page_URL NVARCHAR(500);
 ```
 
 欄位說明:
