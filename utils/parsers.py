@@ -416,7 +416,7 @@ class GPUParser:
                 'Temperatures & Fan noise',
                 'Cooler Performance Comparison',
                 'Overclocking & Power Limits',
-                'Overclocking'
+                'Overclocking',
                 'Circuit Board Analysis',
             ]
             
@@ -616,7 +616,7 @@ class GPUParser:
                             'idle_gpu': ('IdleGPUTemp', r'(\d+)[°℃]'),
                             'gaming_gpu': ('GamingGPUTemp', r'(\d+)[°℃]'),
                             'memory': ('MemoryTemp', r'(\d+)[°℃]'),
-                            'gaming_noise': ('NoiseLevel', r'(\d+(?:\.\d+)?)\s*dBA')
+                            'gaming_noise': ('Noice', r'(\d+(?:\.\d+)?)\s*dBA')
                         }
                         
                         # 遍歷字段抓取數據
@@ -638,8 +638,7 @@ class GPUParser:
                         logger.warning("表格結構不完整，未找到足夠的行")
                 else:
                     logger.warning("未找到溫度或噪音相關的表格或被選中顯卡")             
-            # 超頻和功耗限制表格解析
-            # 超頻表格解析 - 簡化版本
+
             # 根據評測類型提取超頻資料
             elif "Overclocking" in review_type or "Power Limits" in review_type:
                 # 找到表格和active行
@@ -748,6 +747,7 @@ class GPUParser:
                     # 添加通用模式在最上方
                     r'(?:managed|controlled)\s+by\s+(?:a|an)\s+(?:\w+\s+)?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
                     r'controller\s+(?:is|chip\s+is)\s+(?:a|an)?\s+(?:\w+\s+)?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'(?:GPU|graphics|VRM)(?:.{0,80}?)(?:controlled|managed|powered|driven|regulated|using|features|incorporates|utilizes|employs)(?:.{0,20}?)(?:by|with)(?:.{0,15}?)(?:a|an)?(?:\s+)?(?:second\s+)?(?:expensive\s+)?(\w+(?:\s+Power\s+Systems|\s+&|\s+and|\s+Rectifier)?(?:\s+\w+){0,2}\s+\w+\d+[A-Z0-9\-\.]+(?:\s+\([A-Z0-9]+\))?)(?:\s+voltage)?(?:\s+controller|\s+chip|\s+PWM)?'
                     r'(\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)\s+controller',
                     r'voltage\s+controller.*?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
                     r'voltage\s+is\s+powered\s+by\s+(?:an\s+)?(?:expensive\s+)?(\w+\s+\w+\d+[A-Z0-9-]+)',
@@ -793,9 +793,10 @@ class GPUParser:
                 gpu_mos_patterns = [
                     # 添加通用模式在最上方
                     r'(?:All\s+)?GPU\s+power\s+phases\s+use\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?(?:\s+\([A-Z0-9]+\))?)\s+DrMOS(?:\s+components)?.*?(?:with\s+a\s+rating\s+of|rated\s+for)\s+(\d+)\s+A',
+                    r'(?:GPU|graphics|VRM)(?:.{0,100}?)(?:voltage|power|rails?)(?:.{0,100}?)(?:uses?|with|featuring|employs?)(?:\s+)(?:Infineon|OnSemi|Alpha|uPI|Monolithic|[\w\s]+)(?:\s+)([\w\d]+)(?:\s+DrMOS|\s+MOSFET|\s+power\s+stages)(?:.{0,30}?)(\d+)(?:\s*)?A',
                     r'DrMOS\s+for\s+the\s+GPU\s+are\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+).*?rated\s+for\s+(\d+)\s+A',
                     r'DrMOS\s+devices\s+are\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+)',
-                    r'GPU.*?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?(?:\s+\([A-Z0-9]+\))?)\s+DrMOS.*?(\d+)\s+A',
+                    r'GPU.*?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?(?:\s+\([A-Z0-9]+\))?)\s+DrMOS.*?(\d+)\s+A'
                     # 下方是原有的模式
                     r'GPU\s+power\s+phases\s+use\s+(\w+\s+\w+\s+\w+\s+DrMOS)(?:\s+with\s+a\s+rating\s+of\s+(\d+)\s+A)?',
                     r'(\w+\s+\w+\s+\w+\s+DrMOS)(?:\s+rated\s+for\s+(\d+)\s+A)?',
@@ -885,6 +886,7 @@ class GPUParser:
                 mem_controller_patterns = [
                     # 添加通用模式在最上方
                     r'(?:driven|controlled)\s+by\s+(?:a|an|another|the\s+same)\s+(?:second\s+)?(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\([A-Z0-9]+\))?)',
+                    r'(?:Memory|memory|GDDR\d*|DDR\d*|RAM)(?:.{0,80}?)(?:controlled|managed|powered|driven|regulated|generated|using|features|incorporates|utilizes|employs)(?:.{0,20}?)(?:by|with)(?:.{0,15}?)(?:a|an|another|the\s+same)?(?:\s+)?(?:second\s+)?(\w+(?:\s+Power\s+Systems|\s+&|\s+and|\s+Rectifier)?(?:\s+\w+){0,2}\s+\w+\d+[A-Z0-9\-\.]+(?:\s+\([A-Z0-9]+\))?)(?:\s+voltage)?(?:\s+controller|\s+chip|\s+PWM)?',
                     r'(?:memory|Memory)\s+(?:controller|voltage)\s+is\s+(?:controlled\s+by|(?:a|an)?\s+\w+[\s-]*phase\s+design\s+generated\s+by)\s+(?:a|an)?\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+)',
                     r'Both\s+are\s+managed\s+by\s+another\s+(\w+(?:\s+&|\s+and)?\s+\w+)',
                     # 下面是原有的模式
@@ -925,44 +927,12 @@ class GPUParser:
                 if not mem_controller_found:
                     logger.warning(f"未找到記憶體控制器型號資料，評測標題: {content.get('title', '')}")
                     
-                # 使用多種模式匹配 Memory 芯片型號和速率
-                # mem_chip_patterns = [
-                #     r'memory\s+chips\s+are\s+made\s+by\s+(\w+),\s+and\s+bear\s+the\s+model\s+number\s+([\w\-]+),\s+they\s+are\s+rated\s+for\s+(\d+)\s+Gbps',
-                #     r'(\w+)\s+([\w\-]+)\s+memory\s+chips.*?rated\s+(?:at|for)\s+(\d+)\s+Gbps',
-                #     r'memory\s+chips\s+(?:are|from)\s+(\w+)\s+([\w\-]+).*?(\d+)\s+Gbps'
-                # ]
-                
-                # mem_chip_found = False
-                # for pattern in mem_chip_patterns:
-                #     mem_chip_match = re.search(pattern, content['body'], re.IGNORECASE)
-                #     if mem_chip_match:
-                #         mem_chip_found = True
-                #         manufacturer = mem_chip_match.group(1)
-                #         model = mem_chip_match.group(2)
-                #         speed = mem_chip_match.group(3)
-                        
-                #         review_data.append({
-                #             'data_type': 'Memory',
-                #             'data_key': '記憶體型號',
-                #             'data_value': f"{manufacturer} {model} {speed}",
-                #             'data_unit': 'Gbps',
-                #             'product_name': content.get('title', '')
-                #         })
-                #         review_specs_data.append({
-                #             'category': 'Memory',
-                #             'name': 'MemoryControllerModel',
-                #             'value': f"{manufacturer} {model} {speed}"
-                #         })
-                #         logger.info(f"成功匹配記憶體晶片型號: {manufacturer} {model} {speed}Gbps")
-                #         break
-                
-                # if not mem_chip_found:
-                #     logger.warning(f"未找到記憶體晶片型號資料，評測標題: {content.get('title', '')}")
                 
                 # 使用多種模式匹配 Memory MOS規格
                 mem_mos_patterns = [
                     # 添加通用模式在最上方
                     r'(?:memory|Memory)\s+is\s+handled\s+by\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+(?:\s+\w+\d+)?(?:\s+\([A-Z0-9]+\))?)\s+DrMOS(?:\s+chips)?.*?(?:with\s+a|rated\s+for)\s+(\d+)\s+A',
+                    r'(?:Memory|memory|GDDR\d*|DDR\d*|RAM)(?:.{0,100}?)(?:is\s+handled\s+by|uses|utilizes|employs|features|incorporates|with|has|includes|use|using|for\s+memory)(?:.{0,20}?)(?:,\s+)?(?:are\s+)?(\w+(?:\s+Power\s+Systems|\s+&|\s+and)?(?:\s+\w+){0,2}\s+\w+\d+[A-Z0-9\-\.]+(?:\s+\([A-Z0-9]+\))?)(?:\s+\w+)?(?:\s+DrMOS|\s+MOSFET|\s+power\s+stages)?(?:.{0,50}?)(?:with\s+a|rated\s+for|rated\s+at|delivering|capable\s+of)?(?:.{0,10}?)?(?:(\d+)(?:\s*)?A)?',
                     r'(?:memory|Memory)\s+VRM\s+uses\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+)\s+DrMOS',
                     r'(?:memory|Memory)\s+power\s+circuitry\s+uses\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+)\s+DrMOS',
                     r'For\s+(?:memory|Memory),\s+(\w+(?:\s+&|\s+and)?\s+\w+\s+\w+\d+[A-Z0-9-]+).*?(?:with\s+a|rated\s+for)\s+(\d+)\s+A',
