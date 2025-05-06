@@ -73,11 +73,11 @@ async def run_scraper(background_tasks: BackgroundTasks, mode: str = None):
     # 根據模式決定要啟動的任務
     if mode is None:
         # 原始模式 - 完整爬蟲
-    background_tasks.add_task(start_scraper)
-    return {
-        "success": True,
-        "message": "爬蟲已在背景啟動，完成後將發送郵件通知"
-    }
+        background_tasks.add_task(start_scraper)
+        return {
+            "success": True,
+            "message": "爬蟲已在背景啟動，完成後將發送郵件通知"
+        }
     elif mode == "full":
         # 全量更新模式
         from utils.update_review import UpdateManager
@@ -100,7 +100,89 @@ async def run_scraper(background_tasks: BackgroundTasks, mode: str = None):
             "message": "無效的模式參數，有效值：null (原始爬蟲), full (全量更新), incremental (增量更新)"
         }
 
+@app.get("/run-scraper-selected")
+async def start_selected_scraper(gpu_name=None):
+    """以指定的 GPU 名稱執行爬蟲"""
+    global is_scraper_running, last_scrape_result, current_scraper
+    
+    if is_scraper_running:
+        logger.info("爬蟲已在執行，忽略本次請求")
+        return
+    
+    start_time = datetime.now()
+    
+    try:
+        is_scraper_running = True
+        logger.info(f"指定 GPU 爬蟲開始執行: {start_time.isoformat()}")
+        
+        # 初始化爬蟲
+        scraper = GPUScraper()
+        current_scraper = scraper  # 保存引用以便檢查狀態
+        
+        # 執行選擇性爬蟲
+        await scraper.run_selected(gpu_name)
+        
+        # 獲取爬蟲統計結果
+        stats = scraper.state.get_stats()
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        # 更新全局變量，保存結果
+        last_scrape_result = {
+            "mode": "selected_gpu",
+            "gpu_name": gpu_name,
+            "started_at": start_time.isoformat(),
+            "completed_at": end_time.isoformat(),
+            "stats": {
+                "products": stats['products'],
+                "specs": stats['specs'],
+                "reviews": stats['reviews'],
+                "elapsed_time": round(duration, 2)
+            },
+            "success": True
+        }
+        
+        logger.info(f"指定 GPU 爬蟲完成: {end_time.isoformat()}, 耗時: {duration}秒")
+        
+    except Exception as e:
+        logger.error(f"指定 GPU 爬蟲執行錯誤: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # 記錄錯誤信息
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        last_scrape_result = {
+            "mode": "selected_gpu",
+            "gpu_name": gpu_name,
+            "started_at": start_time.isoformat(),
+            "completed_at": end_time.isoformat(),
+            "error": str(e),
+            "success": False
+        }
+        
+    finally:
+        is_scraper_running = False
 
+async def run_scraper_selected(background_tasks: BackgroundTasks, gpu_name: str = None):
+    """啟動爬蟲並只爬取指定的 GPU"""
+    global is_scraper_running
+    
+    if is_scraper_running:
+        return {
+            "success": False,
+            "message": "爬蟲已在執行中，請稍後再試"
+        }
+    
+    # 啟動帶有 GPU 名稱參數的背景任務
+    background_tasks.add_task(start_selected_scraper, gpu_name)
+    
+    return {
+        "success": True,
+        "message": f"已開始爬取 GPU: {gpu_name if gpu_name else '全部'}，完成後將發送通知"
+    }
+    
 @app.get("/status")
 async def get_status():
     """獲取爬蟲狀態和最近一次結果的 API 端點"""
@@ -110,7 +192,7 @@ async def get_status():
         "is_running": is_scraper_running,
         "last_result": last_scrape_result
     }
-
+    
     # 如果當前有正在運行的爬蟲，獲取其詳細狀態
     if is_scraper_running and 'current_scraper' in globals() and current_scraper:
         try:
@@ -741,7 +823,94 @@ class GPUScraper:
                 else:
                     print(f"{Fore.RED}無效的選擇{Style.RESET_ALL}")
                     input("按 Enter 繼續...")
-    
+
+    async def run_selected(self, gpu_name=None):
+        """執行爬蟲，只處理特定 GPU"""
+        try:
+            print(f"{Fore.GREEN}開始爬取指定 GPU: {gpu_name}{Style.RESET_ALL}")
+            logger.info(f"開始執行指定 GPU 爬蟲: {gpu_name}")
+            
+            # 建立 HTTP 會話
+            await self.setup_session()
+            
+            # 爬取產品列表
+            gpu_list = await self.scrape_product_list()
+            
+            if not gpu_list:
+                logger.error("未找到 GPU 列表")
+                return
+            
+            logger.info(f"獲取到 {len(gpu_list)} 個 GPU")
+            
+            # 篩選出完全匹配的 GPU（不區分大小寫但需完全匹配）
+            if gpu_name:
+                gpu_name_lower = gpu_name.lower().strip()
+                filtered_list = [gpu for gpu in gpu_list if gpu['name'].lower().strip() == gpu_name_lower]
+                
+                # 如果找不到完全匹配的，可以顯示提示
+                if not filtered_list:
+                    logger.error(f"未找到完全匹配 '{gpu_name}' 的 GPU")
+                    logger.info("可能的匹配有:")
+                    for gpu in gpu_list:
+                        if gpu_name_lower in gpu['name'].lower():
+                            logger.info(f"- {gpu['name']}")
+                    return
+                
+                gpu_list = filtered_list
+                
+                logger.info(f"篩選後保留 {len(gpu_list)} 個 GPU")
+                for gpu in gpu_list:
+                    logger.info(f"將處理: {gpu['name']}")
+                    
+            # 將篩選後的 GPU 加入佇列
+            for gpu in gpu_list:
+                await self.product_queue.put(gpu)
+            
+            # 啟動工作協程
+            product_workers = []
+            board_workers = []
+            
+            # 產品處理工作協程
+            worker = asyncio.create_task(self.product_worker())
+            product_workers.append(worker)
+            logger.info("啟動產品工作協程")
+            
+            # 主板評測處理工作協程
+            for i in range(3):  # 同時處理 3 個評測
+                worker = asyncio.create_task(self.board_worker())
+                board_workers.append(worker)
+                logger.info(f"啟動主板評測工作協程 #{i+1}")
+            
+            # 等待產品佇列處理完成
+            await self.product_queue.join()
+            logger.info("產品處理完成")
+            
+            # 等待主板評測佇列處理完成
+            await self.board_queue.join()
+            logger.info("所有主板評測處理完成")
+            
+            # 取消工作協程
+            for worker in product_workers + board_workers:
+                worker.cancel()
+            
+            # 輸出統計信息
+            stats = self.state.get_stats()
+            print(f"{Fore.GREEN}爬蟲完成！共處理 {stats['products']} 個 GPU, {stats['specs']} 條規格, {stats['reviews']} 個評測{Style.RESET_ALL}")
+            logger.info(f"爬蟲完成。統計: {stats}")
+            
+        except Exception as e:
+            logger.error(f"爬蟲過程中發生錯誤: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+        finally:
+            # 關閉 HTTP 會話
+            if self.session:
+                await self.session.close()
+                logger.info("HTTP 會話已關閉")
+            
+            # 關閉數據庫連接
+            await self.db.disconnect()
+            logger.info("資料庫連接已關閉")
     async def run(self, limit=None):
         """執行爬蟲"""
         try:
